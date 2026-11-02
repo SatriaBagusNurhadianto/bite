@@ -2576,7 +2576,31 @@ def _newer(latest, current):
         return False
 
 
+def leave_own_python() -> None:
+    """Run the project's tests with the project's Python, not Bite's own. A tool runner like uvx
+    (`uvx --from bite-check bite --free`) puts Bite's private environment first on PATH, so "python3 -m pytest"
+    found a Python with no pytest and none of the project's packages. Drop that folder from PATH unless it's an
+    environment the user turned on (VIRTUAL_ENV) or one inside the project (uv run, poetry, .venv)."""
+    if sys.prefix == sys.base_prefix:
+        return  # Bite runs in a plain Python: nothing of its own to step around
+    own = Path(sys.prefix, "Scripts" if bite.WINDOWS else "bin")
+    parts = os.environ.get("PATH", "").split(os.pathsep)
+    same = lambda a, b: os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+    if not parts or not parts[0] or not same(parts[0], own):
+        return  # pipx, pip install and the plugin leave PATH alone: their Python is found the usual way
+    if os.environ.get("VIRTUAL_ENV") and same(os.environ["VIRTUAL_ENV"], sys.prefix):
+        return
+    try:
+        Path.cwd().resolve().relative_to(Path(sys.prefix).resolve().parent)
+        return  # the project's own .venv, with Bite installed in it
+    except ValueError:
+        pass
+    os.environ["PATH"] = os.pathsep.join(p for p in parts if not (p and same(p, own)))
+
+
 def main(argv=None):
+    if argv is None:  # run from the command line (a test calling main() keeps its own PATH)
+        leave_own_python()
     argv = list(sys.argv[1:] if argv is None else argv)
     if "--json" in argv and argv[:1] not in (["live"], ["ask"], ["mcp"]) and not {"-h", "--help", "--version"} & set(argv):
         # Only the results go to stdout, so a program can read them; what Bite says along the way goes to stderr.
@@ -2681,6 +2705,7 @@ def main(argv=None):
         return 1
     t0 = time.time()
     cs = commits(root, opt("--last", 40), since)  # --all is still accepted: every commit is the default now
+    seen = len(cs)
     top = cs[0]["sha"] if cs else ""  # the newest commit of all, even one that changed no code
     for c in cs:
         files_of(root, c, cfg)
@@ -2696,7 +2721,11 @@ def main(argv=None):
               + ", ".join(c["sha"][:8] for c in other), flush=True)
     if not cs:
         thin = repo.shallow(root)  # --last can't help: the history isn't there
-        print(f"Nothing to check. {repo.SHALLOW}" if thin else "Nothing to check. Try a larger --last.")
+        whole = not since and seen < int(opt("--last", 40))  # git had fewer commits than asked for
+        print(f"Nothing to check. {repo.SHALLOW}" if thin else
+              f"Nothing to check: that was every commit in this repository ({seen}), and none changed code your "
+              f"tests run ({lang}). Make a change with a test, commit it, and run Bite again." if whole else
+              "Nothing to check. Try a larger --last.")
         write_comment(root, [], none=f"The code changed here isn't {lang}, and your tests only run {lang}, so they "
                                      "can't notice it." if other else repo.SHALLOW if thin else "")
         return 0
@@ -2726,7 +2755,8 @@ def main(argv=None):
         cs = [c for c in cs if c["test_code"]]
         print(f"No fix claims found in the last {opt('--last', 40)} commits, so there's nothing to hold them to"
               + (f". Checking the {len(cs)} that added tests: do those tests check the change?" if cs else
-                 ". (--any checks them anyway.)"), flush=True)
+                 ", and none of them added tests. To check every change anyway, run:\n    "
+                 + " ".join(["bite", *argv, "--any"])), flush=True)
         if not cs:
             write_comment(root, [], none="No commit in this pull request says it fixes something, so there's no claim to check.")
             return 0
