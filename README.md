@@ -99,6 +99,33 @@ https://code.claude.com/docs/en/agent-sdk/overview). The commits Bite checks can
 Works with pytest, npm test, cargo test, go test, dotnet test, Maven and Gradle. Settings and limits: [AGENTS.md](https://github.com/connabyss/bite/blob/main/AGENTS.md),
 written so your coding AI (Claude Code, Codex, Cursor, Copilot) can set Bite up for you. To work on Bite itself: clone it, `pip install -e .[test]`, then `python -m pytest`.
 
+## When a check is slow
+
+Bite runs your tests several times for each change, so a slow test suite makes a slow check. Four ways to speed it up:
+
+- `bite --free --jobs 4` checks 4 changes at a time. If two checks get in each other's way (a shared file, a port),
+  Bite runs the failed one again on its own before it counts, so a clash never shows up as a result.
+- Bite remembers the changes it checked with ✅ in `bite_proof/checked.json`, and skips them next time when the
+  tests, settings and dependency files (requirements.txt, package-lock.json, go.sum, ...) are the same. Add,
+  change or delete a test, or update a library, and those changes are checked again. `--again`
+  checks everything anyway. The Action keeps that memory between runs for you.
+- `bite --free --shard 2/5` runs part 2 of 5. Run parts 1/5 to 5/5 on 5 machines at once and together they check
+  every change, in about a fifth of the time. On GitHub Actions that's a matrix:
+
+  ```yaml
+  strategy:
+    matrix:
+      part: [1, 2, 3, 4, 5]
+  steps:
+    # ... check out and install, as usual
+    - run: bite --free --shard ${{ matrix.part }}/5
+  ```
+
+- pytest: install pytest-xdist and put `test_command = python -m pytest -n auto` in `.bite.ini` to run the tests
+  themselves 4 at a time. Or point `free_test_command` at a faster part of your tests.
+
+When each change takes over 3 minutes, Bite prints these tips at the end of the run.
+
 ## Updating Bite
 
 `bite --version` prints your version, and when a newer one is out it says so and gives you the line to paste.
@@ -224,12 +251,12 @@ jobs:
   bite:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
       # install what your tests need here, e.g. for Python:
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
       - run: python -m pip install pytest -r requirements.txt
       - uses: connabyss/bite@v0.11.0
 ```
@@ -358,7 +385,7 @@ jobs:
   badge:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       # install what your tests need here, as in the pull request check

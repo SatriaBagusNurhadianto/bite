@@ -47,3 +47,14 @@ def test_no_gaps_anywhere_writes_no_report(tmp_path):
     part(parts, "shard-2")
     assert merge_shards.merge(parts, tmp_path / "bite_proof") == []
     assert not (tmp_path / "bite_proof" / "FREE_REPORT.md").exists()
+
+
+def test_every_parts_remembered_checks_are_kept_for_next_time(tmp_path):
+    parts = tmp_path / "parts"
+    for i, sha in enumerate(("aaaa", "bbbb"), 1):
+        d = parts / f"part-{i}" / "bite_proof"
+        d.mkdir(parents=True)
+        (d / "checked.json").write_text(f'{{"{sha}": {{"key": "k", "undo": "guarded"}}}}')
+    merge_shards.merge(parts, tmp_path / "out")
+    import json
+    assert set(json.loads((tmp_path / "out" / "checked.json").read_text())) == {"aaaa", "bbbb"}
