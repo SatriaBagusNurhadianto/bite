@@ -4,7 +4,10 @@ Bite: did your coding agent's recent "done" commits really do what they said?
     bite                      check the last 40 commits (step 2 needs an API key)
     bite --version            print the installed version, and the line to update when a newer one is out
     bite --free               step 1 only: no key, no cost
-    bite --demo               try it on a tiny made-up project first (free, about 30 seconds)
+    bite --demo               try it on a tiny made-up project first (free, about 30 seconds); run outside a
+                              project, plain bite does the same
+    bite --free path/to/repo  check that project without going into its folder first (you can drag the folder
+                              into the terminal window to type its path)
     bite --demo comeback      see the comeback alarm: a later commit quietly undoes a fix, and Bite names it
     bite --last 80 --suspects 3 --budget 1.00
     bite --serious            only fix claims about data, money, logins, security, crashes or leaks
@@ -2516,11 +2519,29 @@ def demo(argv: list) -> int:
         rc = main(["--free", *(a for a in argv if a not in ("--demo", "--free", "comeback"))])
     finally:
         os.chdir(here)
-    print("\nThat was the demo; nothing of yours was touched. To check your own project: go into it and run bite --free")
+    print("\nThat was the demo; nothing of yours was touched.\n"
+          f"To check your own project: type  {how_called()} --free  and a space, drag your project's folder into this\n"
+          "window (that types its path for you), then press Enter.")
     return rc
 
 
+def how_called() -> str:
+    """The command this run was started with, as a person would type it again: bite, bite-check, pipx run bite-check,
+    uvx bite-check, python -m bite_check or python recent.py."""
+    exe, name = sys.executable.replace("\\", "/").lower(), Path(sys.argv[0] if sys.argv else "bite").name.lower()
+    if name in ("bite_check.py", "__main__.py"):
+        return "python -m bite_check"
+    if name.endswith(".py"):
+        return f"python {name}"
+    if "/pipx/" in exe and "/.cache/" in exe:  # pipx run keeps its throwaway environments in pipx's .cache
+        return "pipx run bite-check"
+    if "/uv/" in exe and ("/archive-v" in exe or "/cache/" in exe):  # uvx: uv's cache
+        return "uvx bite-check"
+    return "bite-check" if name.startswith("bite-check") else "bite"
+
+
 # Every option main() accepts; each one must be in the help text above (the self-test checks).
+JSON_RUN = [False]  # set while --json runs, so a run outside a repo answers with JSON instead of the demo
 FLAGS = {"--free", "--all", "--any", "--serious", "--again", "--roast", "--demo", "--write-tests", "--json", "--quick"}
 VALUED = {"--last": int, "--free-checks": int, "--suspects": int, "--budget": float, "--since": str, "--part-runs": int,
           "--shard": str, "--only": str, "--jobs": int}
@@ -2607,8 +2628,12 @@ def main(argv=None):
         import contextlib
         out, argv = sys.stdout, [a for a in argv if a != "--json"]
         LAST_RESULTS[0] = None
-        with contextlib.redirect_stdout(sys.stderr):
-            rc = main(argv)
+        JSON_RUN[0] = True
+        try:
+            with contextlib.redirect_stdout(sys.stderr):
+                rc = main(argv)
+        finally:
+            JSON_RUN[0] = False
         if LAST_RESULTS[0]:
             out.write(LAST_RESULTS[0].read_text(encoding="utf-8"))
         else:
@@ -2636,7 +2661,7 @@ def main(argv=None):
     if "-h" in argv or "--help" in argv:
         print(__doc__.strip())
         return 0
-    i = 0
+    i, folder = 0, None
     while i < len(argv):  # a typo must not fall through to the paid step
         if argv[i] in VALUED and i + 1 >= len(argv):
             print(f"Bite: {argv[i]} needs a value after it, like {argv[i]} {VALUE_EXAMPLE.get(argv[i], 10)}.")
@@ -2655,6 +2680,9 @@ def main(argv=None):
             i += 2
         elif argv[i] in FLAGS or (argv[i] == "comeback" and i and argv[i - 1] == "--demo"):
             i += 1
+        elif folder is None and not argv[i].startswith("-") and Path(argv[i].strip("\"'")).is_dir():
+            # The project's folder, so nobody has to cd first: dragging a folder into the window types its path.
+            folder = argv.pop(i).strip("\"'")
         else:
             print(f"Bite: unknown option {argv[i]!r}. Run bite --help for the options.")
             return 2
@@ -2674,10 +2702,20 @@ def main(argv=None):
         return 1
     if "--demo" in argv:
         return demo(argv)
-    root = repo.repo_root(os.getcwd())
+    root = repo.repo_root(folder or os.getcwd())
     if root is None:
-        print("Bite: not inside a git repository.")
-        return 1
+        if folder:
+            print(f"Bite: {folder} isn't a project with git history (not inside a git repository), so there's\n"
+                  "nothing to check there. Pick the folder you cloned or made with git, the one with your code in it.")
+            return 1
+        if JSON_RUN[0]:
+            print("Bite: not inside a git repository.")
+            return 1
+        # A first run from wherever the terminal opened (C:\WINDOWS\system32, the home folder): show what Bite
+        # does on a made-up project instead of stopping, and say how to point it at a real one.
+        print(f"Bite: this folder ({os.getcwd()}) isn't a project with git history (not inside a git repository),\n"
+              "so here's Bite's demo on a tiny made-up project instead.\n", flush=True)
+        return demo(["--demo"])
     try:
         cfg = repo.load_cfg(root)
     except repo.ConfigError as e:

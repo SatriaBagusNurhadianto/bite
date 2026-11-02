@@ -32,6 +32,8 @@ cd <their repo>
 bite --free
 ```
 
+- No pipx: `python -m pip install bite-check`, then `python -m bite_check --free <their repo>` (works even when
+  pip's command folder isn't on PATH, as is common on Windows). A folder after `--free` saves the `cd`.
 - `bite --free` costs nothing and needs no key. It checks recent commits from any coding AI or person.
   `bite --help` lists the rest.
 - The project's own test runner (e.g. pytest) must be installed in the environment its tests run in, or Bite

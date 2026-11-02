@@ -13,16 +13,21 @@ Bite checks whether an AI coding agent's "fixed" is actually true.
 
 <img alt="bite --demo: one fix is noticed by a test, the other has no test at all" src="https://raw.githubusercontent.com/connabyss/bite/main/assets/bite-demo.svg" width="760">
 
-**Try it on your own repo in one line.** It's free, needs no key, and never changes your files:
+**Try it now.** It's free, needs no key, and never changes your files. If you have Python, paste these two
+lines into any terminal window (PowerShell, cmd, Terminal):
 
 ```
-cd your-repo
-uvx bite-check --free
+python -m pip install bite-check
+python -m bite_check --free
 ```
 
-No [uv](https://docs.astral.sh/uv/)? `pipx run bite-check --free` does the same with [pipx](https://pipx.pypa.io).
-If your commits never say "fix", add `--any` to check every recent change. To keep Bite installed, see
-[Try it in a minute](#try-it-in-a-minute).
+Outside a project, Bite first shows a demo on a tiny made-up one. To check your own project, type the second line
+and a space, drag your project's folder into the window (that types its path), and press Enter.
+
+Have [pipx](https://pipx.pypa.io) or [uv](https://docs.astral.sh/uv/)? One line does it, no install:
+`pipx run bite-check --free` or `uvx bite-check --free`. (On Linux or a Mac, if pip says "externally managed",
+use one of those.) If your commits never say "fix", add `--any` to check every recent change. To keep Bite
+installed as a `bite` command, see [Try it in a minute](#try-it-in-a-minute).
 
 **Here for Hack Week or your first open-source PR?** These [good first issues](https://github.com/connabyss/bite/labels/good%20first%20issue)
 are small, and each one says where to look and when it's done. Comment on one to claim it.
@@ -91,9 +96,11 @@ out and runs the tests, and you see the difference:
 It needs nothing besides git, takes a few seconds, and doesn't touch your files. Then try it on your own project:
 
 ```
-cd /path/to/your-repo
-bite --free
+bite --free /path/to/your-repo
 ```
+
+(Or type `bite --free ` and drag the project's folder into the window. From inside the project's folder, plain
+`bite --free` works too.)
 
 `bite` now works in any terminal window. `bite --free` needs no key and costs nothing. It takes each recent
 change back out, runs your tests, and lists the changes no test guards, plus any new test that still passes
