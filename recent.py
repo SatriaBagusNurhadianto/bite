@@ -16,6 +16,9 @@ Bite: did your coding agent's recent "done" commits really do what they said?
     bite --quick              faster: skip the piece-by-piece check, the flaky-test rerun and the deleted-test check
                               (--part-runs N: test runs the piece check may use in one run, 6 by default)
     bite --since main         only commits that main doesn't have (the pull request check uses this)
+    bite --shard 2/5          split the check into 5 parts and run part 2. Run parts 1/5 to 5/5 on 5 machines at
+                              once: together they cover every commit, in about a fifth of the time
+    bite --only 1a2b3c4d      check just the commits named (comma-separated)
     bite --json               print the results as JSON for other programs (the rest goes to stderr); they're
                               also saved in bite_proof/results.json on every run
     bite --write-tests        after the free check, write the missing test for each change no test noticed
@@ -2288,8 +2291,9 @@ def demo(argv: list) -> int:
 
 # Every option main() accepts; each one must be in the help text above (the self-test checks).
 FLAGS = {"--free", "--all", "--any", "--serious", "--again", "--roast", "--demo", "--write-tests", "--json", "--quick"}
-VALUED = {"--last": int, "--free-checks": int, "--suspects": int, "--budget": float, "--since": str, "--part-runs": int}
-VALUE_EXAMPLE = {"--budget": "1.00", "--since": "main", "--part-runs": 6}
+VALUED = {"--last": int, "--free-checks": int, "--suspects": int, "--budget": float, "--since": str, "--part-runs": int,
+          "--shard": str, "--only": str}
+VALUE_EXAMPLE = {"--budget": "1.00", "--since": "main", "--part-runs": 6, "--shard": "2/5", "--only": "1a2b3c4d"}
 
 
 def extras(root: Path, cfg) -> list:
@@ -2403,6 +2407,11 @@ def main(argv=None):
     ROAST[0] = "--roast" in argv
     QUICK[0] = "--quick" in argv
     PART_RUNS[0] = opt("--part-runs", 6)
+    shard = re.fullmatch(r"(\d+)/(\d+)", opt("--shard", "1/1"))
+    if not shard or not 1 <= int(shard[1]) <= int(shard[2]):
+        print(f"Bite: --shard needs which part and how many parts, like --shard 2/5, got {opt('--shard', '')!r}.")
+        return 2
+    only = [s.strip().lower() for s in opt("--only", "").split(",") if s.strip()]
     if not shutil.which("git"):
         print("Bite: git isn't installed (or isn't on PATH). Install it from https://git-scm.com, "
               "then open a new terminal window.")
@@ -2459,6 +2468,12 @@ def main(argv=None):
         write_comment(root, [], none=f"The code changed here isn't {lang}, and your tests only run {lang}, so they "
                                      "can't notice it." if other else repo.SHALLOW if thin else "")
         return 0
+    if only:  # just the commits named (--only), say the ones a check on several machines found gaps in
+        cs = [c for c in cs if any(c["sha"].startswith(s) for s in only)]
+        print(f"  --only: {len(cs)} of them are named", flush=True)
+        if not cs:
+            print("Nothing to check: no commit that changed code starts with " + ", ".join(only) + ".")
+            return 0
     n_out = 0
     if covers:  # a change the test command can't reach can't fail a test: that says nothing about the change
         import fnmatch
@@ -2497,6 +2512,10 @@ def main(argv=None):
     except (OSError, ValueError):
         kept = []
     free = cs[:opt("--free-checks", 6)]
+    part, parts = int(shard[1]), int(shard[2])
+    if parts > 1:  # one part of several: every parts-th commit, so slow commits spread across the parts
+        free = free[part - 1::parts]
+        print(f"  --shard {part}/{parts}: this run checks {len(free)} of them", flush=True)
     print(f"  free check of {len(free)}: each runs the tests with and without the change", flush=True)
     for c in free:
         c["undo"] = undo_check(root, c, cfg)

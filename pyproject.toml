@@ -23,7 +23,7 @@ classifiers = [
 
 [project.optional-dependencies]
 paid = ["claude-agent-sdk"]
-test = ["pytest"]
+test = ["pytest", "pytest-xdist"]
 
 [project.scripts]
 bite = "recent:main"
