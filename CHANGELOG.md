@@ -3,7 +3,9 @@
 What changed in each Bite release, newest first. Numbers link to the pull request on
 github.com/connabyss/bite. Install or update: `pipx install --force bite-check --pip-args="--no-cache-dir"`.
 
-## Not released yet
+## 1.0.0 (2026-11-02)
+
+The first stable release. The names in results.json and `--json` stay as they are from here on.
 
 New:
 - Bite score: every run says how many of the checked changes a test noticed (7/9), on the report as a ring, in the

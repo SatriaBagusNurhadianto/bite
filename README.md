@@ -258,7 +258,7 @@ jobs:
       # install what your tests need here, e.g. for Python:
       - uses: actions/setup-python@v7
       - run: python -m pip install pytest -r requirements.txt
-      - uses: connabyss/bite@v0.11.0
+      - uses: connabyss/bite@v1.0.0
 ```
 
 Options go under `with:`: `args` (extra `bite` options, e.g. `--serious`), `max-commits` (default 20),
@@ -272,7 +272,7 @@ When no test noticed a change, Bite can write that test for you. Add your Anthro
 named `ANTHROPIC_API_KEY`, then:
 
 ```yaml
-      - uses: connabyss/bite@v0.11.0
+      - uses: connabyss/bite@v1.0.0
         with:
           write-tests: true
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -370,7 +370,7 @@ checks (`--since`) aren't remembered, since they look at different commits.
 Each run also saves `bite_proof/badge.json` in [shields.io's endpoint format](https://shields.io/badges/endpoint-badge),
 so a badge can follow your newest run wherever you publish that file.
 
-**A badge that keeps itself up to date (the Action, opt-in; new since v0.11.0, so it needs the next release):** on every push to main, Bite checks your newest commits
+**A badge that keeps itself up to date (the Action, opt-in):** on every push to main, Bite checks your newest commits
 and keeps the score on a branch of its own, `bite-badge`, which holds only `badge.json`. Add this as
 `.github/workflows/bite-badge.yml`:
 
@@ -389,7 +389,7 @@ jobs:
         with:
           fetch-depth: 0
       # install what your tests need here, as in the pull request check
-      - uses: connabyss/bite@v0.11.0
+      - uses: connabyss/bite@v1.0.0
         with:
           badge-branch: bite-badge
           max-commits: 10
