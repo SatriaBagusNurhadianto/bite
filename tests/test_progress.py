@@ -89,7 +89,7 @@ def test_a_long_test_run_says_it_is_still_running(monkeypatch, capsys):
     recent.doing({"sha": "abcdef1234"}, "running the tests with the change in...")
     recent.run_tests(None, "a")
     out = capsys.readouterr().out
-    assert "still running the tests: abcdef12 for 0 sec so far..." in out, out
+    assert "still running the tests, 0 sec so far..." in out, out
     time.sleep(0.3)  # and it stops when the run ends
     assert "still running" not in capsys.readouterr().out
 
@@ -108,12 +108,12 @@ def test_runs_side_by_side_share_one_still_running_line(monkeypatch, capsys):
     for t in ts:
         t.join()
     ticks = [ln for ln in capsys.readouterr().out.splitlines() if "still running" in ln]
-    assert ticks and all("aaaaaaaa" in ln and "bbbbbbbb" in ln for ln in ticks), ticks
+    assert ticks and all(ln.strip().startswith("still running 2 checks, ") for ln in ticks), ticks
     assert len(ticks) <= 3, ticks
 
 
 def test_times_are_spelled_out():
-    assert recent.spelled(45) == "45 sec" and recent.spelled(210) == "3 min 30 sec"
+    assert recent.spelled(45) == "45 sec" and recent.spelled(210) == "3 min 30 sec" and recent.spelled(120) == "2 min"
 
 
 def test_the_log_spells_out_times():

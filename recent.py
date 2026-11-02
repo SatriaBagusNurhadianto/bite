@@ -952,8 +952,7 @@ _SHARED = {}  # each test run going on now: whether another ran beside it at any
 
 
 TICK = 30  # seconds between "still running" lines while test runs go on
-_NOW = threading.local()  # the commit this thread is checking, for those lines
-_ACTIVE = {}  # each test run going on now: its commit and when it started
+_ACTIVE = {}  # each test run going on now: when it started
 _TICKER = [None]  # the one thread printing those lines, while any run is going on
 
 
@@ -966,21 +965,23 @@ def _ticker():
                 _TICKER[0] = None
                 return
             now = time.monotonic()
-            runs = [f"{label + ' ' if label else ''}for {spelled(now - start)}" for label, start in _ACTIVE.values()]
-        print(f"    still running the tests: {', '.join(runs)} so far...", flush=True)
+            n, longest = len(_ACTIVE), spelled(now - min(_ACTIVE.values()))
+        print(f"    still running {f'{n} checks' if n > 1 else 'the tests'}, {longest} so far...", flush=True)
 
 
 def spelled(secs: float) -> str:
-    """A time in words a newcomer reads at a glance: "45 sec", "3 min 30 sec" (not "3m 30s")."""
+    """A time in words a newcomer reads at a glance: "45 sec", "2 min", "3 min 30 sec" (not "3m 30s")."""
     secs = round(secs)
-    return f"{secs // 60} min {secs % 60} sec" if secs >= 60 else f"{secs} sec"
+    if secs < 60:
+        return f"{secs} sec"
+    return f"{secs // 60} min" + (f" {secs % 60} sec" if secs % 60 else "")
 
 
 def _timed(fcfg, folder) -> dict:
     """bite.run_tests, counted in the "still running" lines while it goes on."""
     me = object()
     with _GATE:
-        _ACTIVE[me] = (getattr(_NOW, "label", ""), time.monotonic())
+        _ACTIVE[me] = time.monotonic()
         if _TICKER[0] is None:
             _TICKER[0] = threading.Thread(target=_ticker, daemon=True)
             _TICKER[0].start()
@@ -1083,7 +1084,6 @@ def remember(root: Path, memo: dict) -> None:
 
 def doing(c: dict, text: str) -> None:
     """One line before each test run, so a slow check shows what it is doing instead of going quiet."""
-    _NOW.label = c["sha"][:8]
     print(f"    {c['sha'][:8]} {text}", flush=True)
 
 
