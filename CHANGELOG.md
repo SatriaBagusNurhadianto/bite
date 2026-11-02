@@ -14,6 +14,8 @@ For someone who has only Python and has never used a terminal much. A walk-throu
   own: type the same line and drag the project's folder into the window.
 - A folder after the options checks that project without `cd` first: `bite --free C:\code\my-app`. A folder that
   has no git history gets a plain "nothing to check there". `--json` outside a project still answers with an error.
+- While checking, "a test failed: running them once more" read like bad news. It now says "good sign, a test
+  noticed the change was gone: running them once more to make sure it wasn't luck".
 
 ## 1.0.2 (2026-11-03)
 

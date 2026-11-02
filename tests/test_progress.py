@@ -78,4 +78,4 @@ def test_the_log_says_what_each_test_run_is():
     log = p.stdout + p.stderr
     assert "running the tests with the change in..." in log, log
     assert "with the change taken out" in log, log
-    assert "once more, to rule out a test that fails by luck" in log, log
+    assert "a test noticed the change was gone: running them once more to make sure it wasn't luck" in log, log

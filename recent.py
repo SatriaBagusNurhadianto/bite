@@ -1098,7 +1098,7 @@ def check_undo(root: Path, c: dict, cfg) -> str:
         if not crashed and not QUICK[0]:
             # Once more: a test that fails now and then (flaky) can fail by luck. Only a test that fails every
             # time the change is out counts as noticing it.
-            doing(c, "a test failed: running them once more, to rule out a test that fails by luck"
+            doing(c, "good sign, a test noticed the change was gone: running them once more to make sure it wasn't luck"
                      + (" (alone, so the other check running beside it can't be the cause)..." if undone.get("shared") else "..."))
             again = run_tests(fcfg, folder, alone=bool(undone.get("shared")))
             if again["ok"]:
