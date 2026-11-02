@@ -114,6 +114,9 @@ Why not just `pipx upgrade bite-check`? Right after a release, pip can keep usin
 earlier and say you're already on the latest. `--no-cache-dir` makes it ask PyPI fresh, and `--force` also replaces
 an older `bite` or `bite.exe` that's in the way.
 
+What changed in each version: [CHANGELOG.md](https://github.com/connabyss/bite/blob/main/CHANGELOG.md). Which languages,
+test runners and places Bite works in: [SUPPORTS.md](https://github.com/connabyss/bite/blob/main/SUPPORTS.md).
+
 ## Check Claude's "fixed" live, in Claude Code
 
 Bite can also check the moment Claude says it fixed something, before you read "fixed!". Each time Claude finishes
