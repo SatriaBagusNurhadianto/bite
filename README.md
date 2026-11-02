@@ -250,12 +250,12 @@ jobs:
   bite:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
       # install what your tests need here, e.g. for Python:
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
       - run: python -m pip install pytest -r requirements.txt
       - uses: connabyss/bite@v0.11.0
 ```
@@ -384,7 +384,7 @@ jobs:
   badge:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       # install what your tests need here, as in the pull request check

@@ -22,6 +22,8 @@ New:
   changes it checked with ✅ and skips them next time, unless a test or setting changed (`--again` checks them all);
   the Action keeps that memory between runs. A slow run ends with tips to speed it up (#PR2).
 - Bite's own weekly check runs on 20 machines at once, and its tests run 4 at a time (#137).
+- The Action and the workflows Bite suggests use the newest GitHub actions (checkout v7, setup-python v7,
+  upload-artifact v7, cache v6, ...), so they no longer warn that Node.js 20 is deprecated (#22).
 
 Fixed:
 - The comeback alarm stays quiet when a later commit did the fix another way, a revert came undone, or a tidy-up
