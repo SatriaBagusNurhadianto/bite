@@ -22,5 +22,7 @@ jobs:
       - run: python -m pip install pytest pytest-xdist
       - uses: ./
         with:
-          # .bite.ini runs the tests 4 at a time; a smaller piece-check budget keeps this check to a few minutes.
-          args: --part-runs 2
+          # .bite.ini runs the tests 4 at a time, --jobs 2 checks 2 commits at once (a run that fails beside the
+          # other counts only if it fails again alone), and a smaller piece-check budget keeps this to a few minutes.
+          # The action remembers commits it already checked on this pull request, so a new push checks only new ones.
+          args: --part-runs 2 --jobs 2

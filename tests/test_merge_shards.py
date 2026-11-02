@@ -1,6 +1,7 @@
 """bot/merge_shards.py: the weekly self-check runs on several machines at once (bite --shard K/N); one last job
 gathers what each found into one report for bot/self_check.py. No gap may get lost on the way. No network."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -58,3 +59,21 @@ def test_every_parts_remembered_checks_are_kept_for_next_time(tmp_path):
     merge_shards.merge(parts, tmp_path / "out")
     import json
     assert set(json.loads((tmp_path / "out" / "checked.json").read_text())) == {"aaaa", "bbbb"}
+
+
+def test_one_table_of_every_change_every_machine_checked(tmp_path):
+    import json
+    parts = tmp_path / "parts"
+    for i, (sha, result, label) in enumerate([("aaaa1111", "noticed", "noticed by test_a"),
+                                               ("bbbb2222", "no_test_noticed", "NO TEST NOTICED")], 1):
+        d = parts / f"part-{i}"
+        d.mkdir(parents=True)
+        (d / "results.json").write_text(json.dumps({"commits": [
+            {"sha": sha * 5, "subject": f"Fix {sha}", "result": result, "label": label}]}))
+    summary = tmp_path / "summary.md"
+    p = subprocess.run([sys.executable, str(KIT / "bot" / "merge_shards.py"), str(parts), str(tmp_path / "out")],
+                       capture_output=True, text=True, encoding="utf-8", env={**os.environ, "GITHUB_STEP_SUMMARY": str(summary)})
+    table = (tmp_path / "out" / "SUMMARY.md").read_text(encoding="utf-8")
+    assert "`aaaa1111` | Fix aaaa1111 | ✅ noticed by test_a" in table and "`bbbb2222` | Fix bbbb2222 | ❌ NO TEST NOTICED" in table
+    assert "2 checked: 1 ✅" in table and table in summary.read_text(encoding="utf-8")
+    assert "Gathered 2 checked changes from 2 machines: 1 with a test that noticed" in p.stderr

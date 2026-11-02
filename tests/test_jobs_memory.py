@@ -122,3 +122,17 @@ def test_a_slow_run_says_what_makes_the_next_one_faster():
     assert "-n auto" not in recent.slow_tip(600, 5, SimpleNamespace(test_cmd="python -m pytest -n auto"))
     assert "-n auto" not in recent.slow_tip(600, 5, SimpleNamespace(test_cmd="npm test"))
     assert recent.slow_tip(60, 5, SimpleNamespace(test_cmd="npm test")) == ""
+
+
+def test_a_slow_step_shows_it_is_still_working(capsys):
+    sys.path.insert(0, str(KIT))
+    import recent
+    import time as t
+    with recent.heartbeat(every=0.05):
+        t.sleep(0.3)
+    out = capsys.readouterr().out
+    assert "still working" in out and "$0.00 so far" in out
+    with recent.heartbeat(every=0.05):
+        pass
+    t.sleep(0.2)
+    assert "still working" not in capsys.readouterr().out  # it stops when the step is done

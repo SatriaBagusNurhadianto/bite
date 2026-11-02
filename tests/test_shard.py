@@ -58,3 +58,10 @@ def test_a_shard_that_isnt_one_of_the_parts_is_refused(tmp_path):
     r = subprocess.run([PY, str(KIT / "recent.py"), "--free", "--shard", "3/2"], cwd=root, capture_output=True,
                        text=True)
     assert r.returncode == 2 and "--shard 2/5" in r.stdout
+
+
+def test_help_explains_shard_and_only_in_plain_words():
+    out = subprocess.run([sys.executable, str(KIT / "recent.py"), "--help"], capture_output=True, text=True,
+                         encoding="utf-8").stdout
+    assert "split the check into 5 parts and run part 2" in out and "in about a fifth of the time" in out
+    assert re.search(r"^ +bite --only 1a2b3c4d +check just the commits named", out, re.M), out
