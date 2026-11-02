@@ -948,14 +948,18 @@ _BUSY = [0, False]  # test runs going on side by side, and whether one has the m
 _SHARED = {}  # each test run going on now: whether another ran beside it at any point
 
 
-def run_tests(fcfg, folder) -> dict:
+def run_tests(fcfg, folder, alone: bool = False, confirm: bool = True) -> dict:
     """bite.run_tests, and with --jobs, side by side with other commits' runs. Tests run side by side can trip over
     each other (the same port, the same database), and a failure caused by that would read as "a test noticed" and
     hide a real gap. So with --jobs a failed run that shared the machine with another run counts only if it fails
     again with the machine to itself. A run that had the machine to itself anyway (one commit to check, or the
-    others already done) isn't run twice: that only doubled the time of every failing run."""
+    others already done) isn't run twice: that only doubled the time of every failing run.
+    alone: run it with the machine to itself straight away. confirm=False: return a failed shared run as it is
+    (marked "shared"), for a caller whose next run (alone) confirms it anyway."""
     if JOBS[0] <= 1:
         return bite.run_tests(fcfg, folder)
+    if alone:
+        return _run_alone(fcfg, folder)
     me = object()
     with _GATE:
         _GATE.wait_for(lambda: not _BUSY[1])
@@ -972,6 +976,12 @@ def run_tests(fcfg, folder) -> dict:
             _GATE.notify_all()
     if r["ok"] or not shared:
         return r
+    if not confirm:
+        return {**r, "shared": True}
+    return _run_alone(fcfg, folder)
+
+
+def _run_alone(fcfg, folder) -> dict:
     with _GATE:
         _GATE.wait_for(lambda: not _BUSY[1] and not _BUSY[0])
         _BUSY[1] = True
@@ -1063,7 +1073,11 @@ def check_undo(root: Path, c: dict, cfg) -> str:
         bite.cap_hang(fcfg, now)
         take_out(root, c, folder)
         doing(c, f"running them with the change taken out (they took {took(now)} with it in)...")
-        undone = run_tests(fcfg, folder)
+        # A failure beside another commit's run (--jobs) is confirmed by the next run, alone: the rerun below, or
+        # here when there is none. Confirming it straight away too ran every noticed change's tests twice more.
+        undone = run_tests(fcfg, folder, confirm=False)
+        if undone.get("shared") and (QUICK[0] or bite.load_failure(undone["out"])):
+            undone = run_tests(fcfg, folder, alone=True)
 
         def flag():  # would be flagged: first rule out the usual harmless reasons
             if c.get("skip"):
@@ -1081,10 +1095,12 @@ def check_undo(root: Path, c: dict, cfg) -> str:
         if not crashed and not QUICK[0]:
             # Once more: a test that fails now and then (flaky) can fail by luck. Only a test that fails every
             # time the change is out counts as noticing it.
-            doing(c, "a test failed: running them once more, to rule out a test that fails by luck...")
-            again = run_tests(fcfg, folder)
+            doing(c, "a test failed: running them once more, to rule out a test that fails by luck"
+                     + (" (alone, so the other check running beside it can't be the cause)..." if undone.get("shared") else "..."))
+            again = run_tests(fcfg, folder, alone=bool(undone.get("shared")))
             if again["ok"]:
-                c["flaky"] = caught_by(undone["out"]) or "a test"
+                if not undone.get("shared"):  # beside another run, it may have been the other run's doing
+                    c["flaky"] = caught_by(undone["out"]) or "a test"
                 return flag()
         c["caught"] = caught_by(undone["out"])
         hung = not c["caught"] and hang_note(undone, now)

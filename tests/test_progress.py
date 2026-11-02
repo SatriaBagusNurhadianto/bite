@@ -45,6 +45,21 @@ def test_a_failing_run_beside_another_is_run_again_alone(monkeypatch):
     assert sorted(calls) == ["a", "a", "b", "b"]
 
 
+def test_a_failing_run_beside_another_can_leave_the_confirming_to_the_next_run(monkeypatch):
+    calls = fake_runs(monkeypatch, secs=0.3)
+    out = {}
+    ts = [threading.Thread(target=lambda n=name: out.update({n: recent.run_tests(None, n, confirm=False)}))
+          for name in ("a", "b")]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert sorted(calls) == ["a", "b"]  # not run again here: the flaky rerun, alone, confirms it
+    assert out["a"]["shared"] and out["b"]["shared"]
+    assert not recent.run_tests(None, "c", alone=True)["ok"]
+    assert sorted(calls) == ["a", "b", "c"]
+
+
 def test_the_log_says_what_each_test_run_is():
     root = Path(tempfile.mkdtemp(prefix="bite_progress_"))
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
