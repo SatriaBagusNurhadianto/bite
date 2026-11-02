@@ -951,7 +951,29 @@ _BUSY = [0, False]  # test runs going on side by side, and whether one has the m
 _SHARED = {}  # each test run going on now: whether another ran beside it at any point
 
 
+TICK = 30  # seconds between "still running" lines while one test run goes on
+_NOW = threading.local()  # the commit this thread is checking, for those lines
+
+
 def run_tests(fcfg, folder, alone: bool = False, confirm: bool = True) -> dict:
+    """_run_tests, with a "still running (30s)..." line every TICK seconds, so a slow test suite doesn't look stuck."""
+    stop, start = threading.Event(), time.monotonic()
+    who = f"{_NOW.label} " if getattr(_NOW, "label", "") else ""
+
+    def tick():
+        while not stop.wait(TICK):
+            print(f"    {who}still running the tests ({round(time.monotonic() - start)}s so far)...", flush=True)
+
+    t = threading.Thread(target=tick, daemon=True)
+    t.start()
+    try:
+        return _run_tests(fcfg, folder, alone, confirm)
+    finally:
+        stop.set()
+        t.join()
+
+
+def _run_tests(fcfg, folder, alone: bool = False, confirm: bool = True) -> dict:
     """bite.run_tests, and with --jobs, side by side with other commits' runs. Tests run side by side can trip over
     each other (the same port, the same database), and a failure caused by that would read as "a test noticed" and
     hide a real gap. So with --jobs a failed run that shared the machine with another run counts only if it fails
@@ -1042,6 +1064,7 @@ def remember(root: Path, memo: dict) -> None:
 
 def doing(c: dict, text: str) -> None:
     """One line before each test run, so a slow check shows what it is doing instead of going quiet."""
+    _NOW.label = c["sha"][:8]
     print(f"    {c['sha'][:8]} {text}", flush=True)
 
 

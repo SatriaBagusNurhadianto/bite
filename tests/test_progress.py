@@ -79,3 +79,16 @@ def test_the_log_says_what_each_test_run_is():
     assert "running the tests with the change in..." in log, log
     assert "with the change taken out" in log, log
     assert "a test noticed the change was gone: running them once more to make sure it wasn't luck" in log, log
+
+
+def test_a_long_test_run_says_it_is_still_running(monkeypatch, capsys):
+    # On CH's PC (2026-11-02) each run of a 34-second suite left the log silent, which looks stuck to a newcomer.
+    fake_runs(monkeypatch, secs=0.35)
+    monkeypatch.setattr(recent, "JOBS", [1])
+    monkeypatch.setattr(recent, "TICK", 0.1)
+    recent.doing({"sha": "abcdef1234"}, "running the tests with the change in...")
+    recent.run_tests(None, "a")
+    out = capsys.readouterr().out
+    assert "abcdef12 still running the tests (" in out and "s so far)..." in out, out
+    time.sleep(0.25)  # and it stops when the run ends
+    assert "still running" not in capsys.readouterr().out
