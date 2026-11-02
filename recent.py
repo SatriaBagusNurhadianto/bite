@@ -1343,8 +1343,7 @@ def caught_by(out: str) -> str:
 
 
 def took(run: dict) -> str:
-    secs = round(run.get("secs") or 0)
-    return f"{secs // 60}m {secs % 60}s" if secs >= 60 else f"{secs}s"
+    return spelled(run.get("secs") or 0)
 
 
 def hang_note(undone: dict, now: dict) -> str:
@@ -2998,7 +2997,7 @@ def main(argv=None):
               f"Badge for your README: {BADGE}")
     if flagged:
         print(f"Each change no test noticed, with a check you can rerun and a note for your coding AI: {write_free(root, cfg, flagged)}")
-    print(f"\n{time.time() - t0:.0f}s, ${SPENT[0]:.2f}")
+    print(f"\nTook {spelled(time.time() - t0)}, spent ${SPENT[0]:.2f}.")
     save_log(root, tried, cs)
     save_missing_tests(root, flagged)
     write_comment(root, cs, newest=newest, tried=tried)

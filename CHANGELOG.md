@@ -18,6 +18,8 @@ For someone who has only Python and has never used a terminal much. A walk-throu
   noticed the change was gone: running them once more to make sure it wasn't luck".
 - A slow test suite left the log silent for each run, which looked stuck. Every 30 seconds Bite now prints one line
   for all the runs going on: "still running the tests: 9154ae6e for 1 min 30 sec, 0aceedde for 30 sec so far...".
+- Times in the log are in words: "they took 1 min 25 sec with it in" (was "1m 25s"), and the last line says
+  "Took 3 min 30 sec, spent $0.00." (was "210s, $0.00").
 
 ## 1.0.2 (2026-11-03)
 

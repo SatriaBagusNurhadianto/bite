@@ -114,3 +114,10 @@ def test_runs_side_by_side_share_one_still_running_line(monkeypatch, capsys):
 
 def test_times_are_spelled_out():
     assert recent.spelled(45) == "45 sec" and recent.spelled(210) == "3 min 30 sec"
+
+
+def test_the_log_spells_out_times():
+    # CH (2026-11-02): "what is 3m". "They took 1m 25s with it in" and "210s, $0.00" now say it in words.
+    assert recent.took({"secs": 85}) == "1 min 25 sec"
+    src = Path(RECENT).read_text(encoding="utf-8")
+    assert "Took {spelled(time.time() - t0)}, spent $" in src
