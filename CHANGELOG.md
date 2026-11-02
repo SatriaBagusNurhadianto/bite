@@ -16,8 +16,8 @@ For someone who has only Python and has never used a terminal much. A walk-throu
   has no git history gets a plain "nothing to check there". `--json` outside a project still answers with an error.
 - While checking, "a test failed: running them once more" read like bad news. It now says "good sign, a test
   noticed the change was gone: running them once more to make sure it wasn't luck".
-- A slow test suite left the log silent for each run, which looked stuck. Every 30 seconds of a run, Bite now prints
-  "still running the tests (60s so far)...".
+- A slow test suite left the log silent for each run, which looked stuck. Every 30 seconds Bite now prints one line
+  for all the runs going on: "still running the tests: 9154ae6e for 1 min 30 sec, 0aceedde for 30 sec so far...".
 
 ## 1.0.2 (2026-11-03)
 

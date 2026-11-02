@@ -951,29 +951,48 @@ _BUSY = [0, False]  # test runs going on side by side, and whether one has the m
 _SHARED = {}  # each test run going on now: whether another ran beside it at any point
 
 
-TICK = 30  # seconds between "still running" lines while one test run goes on
+TICK = 30  # seconds between "still running" lines while test runs go on
 _NOW = threading.local()  # the commit this thread is checking, for those lines
+_ACTIVE = {}  # each test run going on now: its commit and when it started
+_TICKER = [None]  # the one thread printing those lines, while any run is going on
+
+
+def _ticker():
+    """Every TICK seconds, one line for all the test runs going on (one per commit with --jobs), so a slow suite
+    doesn't look stuck. Ends when none is left."""
+    while True:
+        with _GATE:
+            if _GATE.wait_for(lambda: not _ACTIVE, timeout=TICK):  # the last run ended: stop now, not a tick later
+                _TICKER[0] = None
+                return
+            now = time.monotonic()
+            runs = [f"{label + ' ' if label else ''}for {spelled(now - start)}" for label, start in _ACTIVE.values()]
+        print(f"    still running the tests: {', '.join(runs)} so far...", flush=True)
+
+
+def spelled(secs: float) -> str:
+    """A time in words a newcomer reads at a glance: "45 sec", "3 min 30 sec" (not "3m 30s")."""
+    secs = round(secs)
+    return f"{secs // 60} min {secs % 60} sec" if secs >= 60 else f"{secs} sec"
+
+
+def _timed(fcfg, folder) -> dict:
+    """bite.run_tests, counted in the "still running" lines while it goes on."""
+    me = object()
+    with _GATE:
+        _ACTIVE[me] = (getattr(_NOW, "label", ""), time.monotonic())
+        if _TICKER[0] is None:
+            _TICKER[0] = threading.Thread(target=_ticker, daemon=True)
+            _TICKER[0].start()
+    try:
+        return bite.run_tests(fcfg, folder)
+    finally:
+        with _GATE:
+            del _ACTIVE[me]
+            _GATE.notify_all()
 
 
 def run_tests(fcfg, folder, alone: bool = False, confirm: bool = True) -> dict:
-    """_run_tests, with a "still running (30s)..." line every TICK seconds, so a slow test suite doesn't look stuck."""
-    stop, start = threading.Event(), time.monotonic()
-    who = f"{_NOW.label} " if getattr(_NOW, "label", "") else ""
-
-    def tick():
-        while not stop.wait(TICK):
-            print(f"    {who}still running the tests ({round(time.monotonic() - start)}s so far)...", flush=True)
-
-    t = threading.Thread(target=tick, daemon=True)
-    t.start()
-    try:
-        return _run_tests(fcfg, folder, alone, confirm)
-    finally:
-        stop.set()
-        t.join()
-
-
-def _run_tests(fcfg, folder, alone: bool = False, confirm: bool = True) -> dict:
     """bite.run_tests, and with --jobs, side by side with other commits' runs. Tests run side by side can trip over
     each other (the same port, the same database), and a failure caused by that would read as "a test noticed" and
     hide a real gap. So with --jobs a failed run that shared the machine with another run counts only if it fails
@@ -982,7 +1001,7 @@ def _run_tests(fcfg, folder, alone: bool = False, confirm: bool = True) -> dict:
     alone: run it with the machine to itself straight away. confirm=False: return a failed shared run as it is
     (marked "shared"), for a caller whose next run (alone) confirms it anyway."""
     if JOBS[0] <= 1:
-        return bite.run_tests(fcfg, folder)
+        return _timed(fcfg, folder)
     if alone:
         return _run_alone(fcfg, folder)
     me = object()
@@ -993,7 +1012,7 @@ def _run_tests(fcfg, folder, alone: bool = False, confirm: bool = True) -> dict:
         for other in _SHARED:  # every run going on now shares the machine with this one
             _SHARED[other] = _SHARED[other] or _SHARED[me]
     try:
-        r = bite.run_tests(fcfg, folder)
+        r = _timed(fcfg, folder)
     finally:
         with _GATE:
             _BUSY[0] -= 1
@@ -1011,7 +1030,7 @@ def _run_alone(fcfg, folder) -> dict:
         _GATE.wait_for(lambda: not _BUSY[1] and not _BUSY[0])
         _BUSY[1] = True
     try:
-        return bite.run_tests(fcfg, folder)
+        return _timed(fcfg, folder)
     finally:
         with _GATE:
             _BUSY[1] = False

@@ -89,6 +89,28 @@ def test_a_long_test_run_says_it_is_still_running(monkeypatch, capsys):
     recent.doing({"sha": "abcdef1234"}, "running the tests with the change in...")
     recent.run_tests(None, "a")
     out = capsys.readouterr().out
-    assert "abcdef12 still running the tests (" in out and "s so far)..." in out, out
-    time.sleep(0.25)  # and it stops when the run ends
+    assert "still running the tests: abcdef12 for 0 sec so far..." in out, out
+    time.sleep(0.3)  # and it stops when the run ends
     assert "still running" not in capsys.readouterr().out
+
+
+def test_runs_side_by_side_share_one_still_running_line(monkeypatch, capsys):
+    # With --jobs 2 each run printed its own line every 30s, interleaved and hard to follow (CH, 2026-11-02).
+    fake_runs(monkeypatch, secs=0.45)
+    monkeypatch.setattr(recent, "TICK", 0.2)
+
+    def check(sha, folder):
+        recent.doing({"sha": sha}, "running the tests with the change in...")
+        recent._timed(None, folder)
+    ts = [threading.Thread(target=check, args=(sha, n)) for sha, n in (("aaaaaaaa11", "a"), ("bbbbbbbb22", "b"))]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    ticks = [ln for ln in capsys.readouterr().out.splitlines() if "still running" in ln]
+    assert ticks and all("aaaaaaaa" in ln and "bbbbbbbb" in ln for ln in ticks), ticks
+    assert len(ticks) <= 3, ticks
+
+
+def test_times_are_spelled_out():
+    assert recent.spelled(45) == "45 sec" and recent.spelled(210) == "3 min 30 sec"
