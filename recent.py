@@ -847,8 +847,10 @@ def came_back(root: Path, c: dict) -> str:
         return ""
     with tempfile.TemporaryDirectory(prefix="bite_back_") as d:  # a scratch index: the user's checkout isn't touched
         env = {**os.environ, "GIT_INDEX_FILE": str(Path(d) / "index")}
-        ok = lambda *a: subprocess.run(["git", *a], cwd=root, env=env, input=diff, capture_output=True).returncode == 0  # noqa: E731
+        ok = lambda *a, patch=diff: subprocess.run(["git", *a], cwd=root, env=env, input=patch,  # noqa: E731
+                                                   capture_output=True).returncode == 0
         context = lines_back(diff)
+        bare = repo.git(root, "diff", "--binary", "-U0", f"{sha}^", sha, "--", *code, raw=True) if context else b""
 
         def gone(rev: str) -> bool:
             """At rev, the fix's change would apply again and can't be taken back out."""
@@ -856,9 +858,12 @@ def came_back(root: Path, c: dict) -> str:
                 return False
             fwd, back = ok("apply", "--cached", "--check", "-"), ok("apply", "--cached", "--check", "-R", "-")
             if not fwd and not back and context:
-                # Code added right next to the fix (often at the end of a small file) changes its context lines, so
-                # neither way applies. Then the lines the fix removed decide: are they back, and its own lines gone?
-                fwd, back = ok("apply", "--cached", "--check", "-C0", "-"), ok("apply", "--cached", "--check", "-C0", "-R", "-")
+                # Code added or removed right next to the fix (often at the end of a small file, or an import beside
+                # it) changes its context lines, so neither way applies. Then the lines the fix removed decide: are
+                # they back, and its own lines gone? (A patch without context: -C0 alone still needs the context
+                # lines between two changes of one hunk.)
+                fwd = ok("apply", "--cached", "--check", "--unidiff-zero", "-", patch=bare)
+                back = ok("apply", "--cached", "--check", "--unidiff-zero", "-R", "-", patch=bare)
             return fwd and not back
 
         if not gone("HEAD"):
@@ -1266,7 +1271,7 @@ def tests_gone_since(root: Path, c: dict, cfg) -> list:
     return [n for n in names if n and bite.is_test_file(n, cfg)]
 
 
-def part_diff(root: Path, c: dict) -> bytes:
+def part_diff(root: Path, c: dict, n: int = 3) -> bytes:
     """The piece no test noticed (see unnoticed_part) as a patch that puts it in, for git apply -R on today's code."""
     out = []
     for rel, undone in c["part_undo"].items():
@@ -1275,8 +1280,21 @@ def part_diff(root: Path, c: dict) -> bytes:
             return b""  # a whole new file: the full diff says the same
         a = undone.decode("utf-8", BYTES).splitlines(keepends=True)
         b = new.decode("utf-8", BYTES).splitlines(keepends=True)
-        out += difflib.unified_diff(a, b, f"a/{rel}", f"b/{rel}")
+        out += difflib.unified_diff(a, b, f"a/{rel}", f"b/{rel}", n=n)
     return "".join(ln if ln.endswith("\n") else ln + "\n\\ No newline at end of file\n" for ln in out).encode("utf-8", BYTES)
+
+
+def change_diff(root: Path, c: dict, context: int = 3) -> bytes:
+    """This commit's code change as a patch (only the piece being checked, with c["part_undo"]), with that many
+    lines of context around each change."""
+    if c.get("part_undo"):
+        return part_diff(root, c, context)
+    return repo.git(root, "diff", "-M", "--binary", f"-U{context}", f"{c['sha']}^", c["sha"], "--", *code_paths(c),
+                    raw=True)
+
+
+def git_apply_ok(folder: Path, diff: bytes, *flags: str) -> bool:
+    return subprocess.run(["git", "apply", *flags, "-"], cwd=folder, input=diff, capture_output=True).returncode == 0
 
 
 def today_notices(root: Path, c: dict, cfg):
@@ -1286,20 +1304,22 @@ def today_notices(root: Path, c: dict, cfg):
     head = repo.git(root, "rev-parse", "HEAD")
     if not head or head == c["sha"]:
         return None
-    diff = part_diff(root, c) if c.get("part_undo") else repo.git(
-        root, "diff", "-M", "--binary", f"{c['sha']}^", c["sha"], "--", *code_paths(c), raw=True)
     folder = export(root, head, cfg)
     fcfg = at(cfg, folder)
     if getattr(cfg, "free_cmd", ""):
         fcfg.test_cmd, fcfg.box_test_cmd = cfg.free_cmd, ""
     try:
-        if not diff or subprocess.run(["git", "apply", "-R", "--check", "-"], cwd=folder, input=diff,
-                                      capture_output=True).returncode != 0:
+        diff, flags = change_diff(root, c), []
+        if diff and not git_apply_ok(folder, diff, "-R", "--check"):
+            # A later edit right next to the fix (a tidy-up removing an import beside it) changed the lines around
+            # it, so the change won't come back out as is. Then only the lines it changed must still match.
+            diff, flags = change_diff(root, c, 0), ["--unidiff-zero"]
+        if not diff or not git_apply_ok(folder, diff, "-R", "--check", *flags):
             return None  # today's code moved on: can't tell
         now = run_tests(fcfg, folder)
         if not now["ok"] or ran_nothing(bite.tests_cmd(fcfg), now["out"]):
             return None
-        subprocess.run(["git", "apply", "-R", "-"], cwd=folder, input=diff, capture_output=True)
+        git_apply_ok(folder, diff, "-R", *flags)
         undone = run_tests(fcfg, folder)
         if undone["ok"]:
             return False
