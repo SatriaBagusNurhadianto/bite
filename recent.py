@@ -1433,6 +1433,22 @@ def judge(cfg, c: dict, diff: str, test: str, fail: str) -> dict:
     return last_json(text)
 
 
+def pytest_one_file(cmd: str, rel: str, project: Path) -> str:
+    """The project's pytest command with its folders and files dropped and this one file added. Each option keeps
+    its value where it was (-n auto, -p no:cacheprovider, -k "slow", --maxfail 2): before, values were dropped or
+    moved, so `-n auto` became `-n` and every test Bite or its worker wrote failed to start."""
+    toks = cmd.split()
+    i = next(i for i, t in enumerate(toks) if "pytest" in t)
+    keep = toks[:i + 1]
+    for t in toks[i + 1:]:
+        path = t.strip("\"'")
+        if not t.startswith("-") and (path in (".", "./") or (project / path).exists() or path.endswith(".py")
+                                      or "::" in path):
+            continue  # a folder or file to test: only this file runs
+        keep.append(t)
+    return " ".join(keep + [rel])
+
+
 def claim_command(cfg, rel: str) -> str:
     """Bite runs the claim test with the project's own test command (never the worker's command line)."""
     if cfg.claim_cmd:
@@ -1447,12 +1463,7 @@ def claim_command(cfg, rel: str) -> str:
         toks = [t for t in cmd.split() if not (t in (".", "./...") or t.startswith("./") or t.endswith("/..."))]
         return " ".join(toks) + " ./" + (posixpath.dirname(rel) or ".")
     if "pytest" in cmd:  # keep the runner and its options, drop the folders it was given: only this file runs
-        toks = cmd.split()
-        i = next(i for i, t in enumerate(toks) if "pytest" in t)
-        keep = toks[:i + 1] + [t for t in toks[i + 1:] if t.startswith("-")]
-        for opt in ("-p", "-c", "-k", "-m", "--rootdir"):  # options that take a value
-            keep += [toks[j + 1] for j in range(i + 1, len(toks) - 1) if toks[j] == opt and toks[j + 1] not in keep]
-        return " ".join(keep) + " " + rel
+        return pytest_one_file(cmd, rel, Path(cfg.project))
     return f"{cmd} {rel}"
 
 
