@@ -48,6 +48,9 @@ Fixed:
   long commit titles are cut, and long tests Bite wrote point to their file instead (#131).
 - `.bite.ini` saved by Windows Notepad works; a setting Bite can't use is named in a sentence instead of a Python
   error (#132).
+- A test Bite or its worker wrote now runs when the project's pytest command has an option with a value: `-n auto`
+  (pytest-xdist) lost its `auto`, so every claim test and every `--write-tests` test failed to start and was
+  thrown out (#PR4).
 - The self-check's issue no longer asks for the API key when Bite has one but didn't keep the test it wrote; it
   says why the test was thrown out (#140).
 - The "check it yourself" steps quote file paths with spaces, so they work when pasted (#133).
