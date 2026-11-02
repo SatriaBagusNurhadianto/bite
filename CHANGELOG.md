@@ -49,7 +49,7 @@ Fixed:
 - `.bite.ini` saved by Windows Notepad works; a setting Bite can't use is named in a sentence instead of a Python
   error (#132).
 - A tidy-up right next to a fix (removing an import beside it) no longer hides a later test that guards it: the
-  fix showed NO TEST NOTICED. The comeback alarm also notices an undo that tidied the line beside the fix (#PR).
+  fix showed NO TEST NOTICED. The comeback alarm also notices an undo that tidied the line beside the fix (#141).
 - The self-check's issue no longer asks for the API key when Bite has one but didn't keep the test it wrote; it
   says why the test was thrown out (#140).
 - The "check it yourself" steps quote file paths with spaces, so they work when pasted (#133).
