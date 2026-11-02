@@ -14,10 +14,10 @@ For someone who has only Python and has never used a terminal much. A walk-throu
   own: type the same line and drag the project's folder into the window.
 - A folder after the options checks that project without `cd` first: `bite --free C:\code\my-app`. A folder that
   has no git history gets a plain "nothing to check there". `--json` outside a project still answers with an error.
-- While checking, "a test failed: running them once more" read like bad news. It now says "good sign, a test
-  noticed the change was gone: running them once more to make sure it wasn't luck".
-- A slow test suite left the log silent for each run, which looked stuck. Every 30 seconds Bite now prints one short line
-  for all the runs going on: "still running 2 checks, 2 min so far...".
+- The log is calm by default: one line per finished check, and every 30 seconds one line like "still checking:
+  1 of 4 done, 2 min so far...". The line before every test run (change in, change out, the rerun, each piece) is
+  now behind `--verbose`, and there the rerun reads as the good news it is: "good sign, a test noticed the change was
+  gone: running them once more to make sure it wasn't luck".
 - Times in the log are in words: "they took 1 min 25 sec with it in" (was "1m 25s"), and the last line says
   "Took 3 min 30 sec, spent $0.00." (was "210s, $0.00").
 

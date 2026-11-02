@@ -26,6 +26,8 @@ Bite: did your coding agent's recent "done" commits really do what they said?
                               fails again with the machine to itself, so tests that share a port can't hide a gap
     (A commit checked before with ✅, with the same tests and settings, isn't run again: bite_proof/checked.json.
      A test deleted since, or a changed test command, makes it run again; --again always does.)
+    bite --verbose            say what each test run is (change in, change out, the rerun, each piece) instead of
+                              one line per finished check
     bite --json               print the results as JSON for other programs (the rest goes to stderr); they're
                               also saved in bite_proof/results.json on every run
     bite --write-tests        after the free check, write the missing test for each change no test noticed
@@ -954,6 +956,8 @@ _SHARED = {}  # each test run going on now: whether another ran beside it at any
 TICK = 30  # seconds between "still running" lines while test runs go on
 _ACTIVE = {}  # each test run going on now: when it started
 _TICKER = [None]  # the one thread printing those lines, while any run is going on
+PROGRESS = {"start": 0.0, "done": 0, "total": 0}  # the free check as a whole, for those lines
+VERBOSE = [False]  # --verbose: a line before every test run (change in, change out, reruns, pieces)
 
 
 def _ticker():
@@ -965,8 +969,12 @@ def _ticker():
                 _TICKER[0] = None
                 return
             now = time.monotonic()
-            n, longest = len(_ACTIVE), spelled(now - min(_ACTIVE.values()))
-        print(f"    still running {f'{n} checks' if n > 1 else 'the tests'}, {longest} so far...", flush=True)
+            if PROGRESS["total"]:
+                line = (f"still checking: {PROGRESS['done']} of {PROGRESS['total']} done, "
+                        f"{spelled(now - PROGRESS['start'])} so far...")
+            else:
+                line = f"still running the tests, {spelled(now - min(_ACTIVE.values()))} so far..."
+        print(f"  {line}", flush=True)
 
 
 def spelled(secs: float) -> str:
@@ -1083,8 +1091,10 @@ def remember(root: Path, memo: dict) -> None:
 
 
 def doing(c: dict, text: str) -> None:
-    """One line before each test run, so a slow check shows what it is doing instead of going quiet."""
-    print(f"    {c['sha'][:8]} {text}", flush=True)
+    """With --verbose, one line before each test run saying what it is. Without it the log stays calm: one line per
+    finished check, and a "still checking" line every TICK seconds."""
+    if VERBOSE[0]:
+        print(f"    {c['sha'][:8]} {text}", flush=True)
 
 
 def undo_check(root: Path, c: dict, cfg) -> str:
@@ -2583,7 +2593,7 @@ def how_called() -> str:
 
 # Every option main() accepts; each one must be in the help text above (the self-test checks).
 JSON_RUN = [False]  # set while --json runs, so a run outside a repo answers with JSON instead of the demo
-FLAGS = {"--free", "--all", "--any", "--serious", "--again", "--roast", "--demo", "--write-tests", "--json", "--quick"}
+FLAGS = {"--verbose", "--free", "--all", "--any", "--serious", "--again", "--roast", "--demo", "--write-tests", "--json", "--quick"}
 VALUED = {"--last": int, "--free-checks": int, "--suspects": int, "--budget": float, "--since": str, "--part-runs": int,
           "--shard": str, "--only": str, "--jobs": int}
 VALUE_EXAMPLE = {"--budget": "1.00", "--since": "main", "--part-runs": 6, "--shard": "2/5", "--only": "1a2b3c4d", "--jobs": 4}
@@ -2730,6 +2740,7 @@ def main(argv=None):
     opt = lambda k, d: type(d)(argv[argv.index(k) + 1]) if k in argv else d  # noqa: E731
     ROAST[0] = "--roast" in argv
     QUICK[0] = "--quick" in argv
+    VERBOSE[0] = "--verbose" in argv
     PART_RUNS[0] = opt("--part-runs", 6)
     JOBS[0] = max(1, opt("--jobs", 1))
     shard = re.fullmatch(r"(\d+)/(\d+)", opt("--shard", "1/1"))
@@ -2873,6 +2884,7 @@ def main(argv=None):
               "(--again runs them anyway)", flush=True)
 
     def done(c):
+        PROGRESS["done"] += 1
         if c["undo"].startswith("unguarded"):
             c["score"] += 2
         elif c["undo"] == "TEST GUARDS NOTHING":
@@ -2884,6 +2896,7 @@ def main(argv=None):
             memo[c["sha"]] = {"key": key, "undo": c["undo"], "caught": c.get("caught", "")}
             remember(root, memo)
         save_log(root, kept, cs)
+    PROGRESS.update(start=time.monotonic(), done=0, total=len(free))
     for c in free:
         if c.get("remembered"):
             done(c)
@@ -2900,6 +2913,7 @@ def main(argv=None):
         for c in todo:
             c["undo"] = undo_check(root, c, cfg)
             done(c)
+    PROGRESS["total"] = 0
     tip = slow_tip((time.time() - t_free) / len(todo), len(todo), cfg) if todo else ""
     if tip:
         print(f"  {tip}", flush=True)

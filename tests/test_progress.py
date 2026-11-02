@@ -73,12 +73,18 @@ def test_the_log_says_what_each_test_run_is():
             (root / name).write_text(text, encoding="utf-8", newline="\n")
         subprocess.run([*GIT, "add", "-A"], cwd=root, check=True)
         subprocess.run([*GIT, "commit", "-q", "-m", subject], cwd=root, check=True)
-    p = subprocess.run([sys.executable, RECENT, "--free", "--any"], cwd=root, capture_output=True, text=True,
-                       encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+    p = subprocess.run([sys.executable, RECENT, "--free", "--any", "--verbose"], cwd=root, capture_output=True,
+                       text=True, encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     log = p.stdout + p.stderr
     assert "running the tests with the change in..." in log, log
     assert "with the change taken out" in log, log
     assert "a test noticed the change was gone: running them once more to make sure it wasn't luck" in log, log
+    # Without --verbose the log is calm (CH, 2026-11-02: "confusing and messy"): no line per test run, only the
+    # result of each check.
+    calm = subprocess.run([sys.executable, RECENT, "--free", "--any", "--again"], cwd=root, capture_output=True,
+                          text=True, encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8"}).stdout
+    assert "Fix total adding one too many" in calm and "noticed by" in calm, calm
+    assert "running the tests with the change" not in calm and "once more" not in calm, calm
 
 
 def test_a_long_test_run_says_it_is_still_running(monkeypatch, capsys):
@@ -89,27 +95,30 @@ def test_a_long_test_run_says_it_is_still_running(monkeypatch, capsys):
     recent.doing({"sha": "abcdef1234"}, "running the tests with the change in...")
     recent.run_tests(None, "a")
     out = capsys.readouterr().out
-    assert "still running the tests, 0 sec so far..." in out, out
+    assert "still running the tests, 0 sec so far..." in out, out  # outside the free check (bite live)
     time.sleep(0.3)  # and it stops when the run ends
     assert "still running" not in capsys.readouterr().out
 
 
 def test_runs_side_by_side_share_one_still_running_line(monkeypatch, capsys):
     # With --jobs 2 each run printed its own line every 30s, interleaved and hard to follow (CH, 2026-11-02).
-    fake_runs(monkeypatch, secs=0.45)
-    monkeypatch.setattr(recent, "TICK", 0.2)
+    both = threading.Barrier(2)
 
-    def check(sha, folder):
-        recent.doing({"sha": sha}, "running the tests with the change in...")
-        recent._timed(None, folder)
-    ts = [threading.Thread(target=check, args=(sha, n)) for sha, n in (("aaaaaaaa11", "a"), ("bbbbbbbb22", "b"))]
+    def run(fcfg, folder):
+        both.wait()  # both runs are going on before the first tick (a slow machine starts one late)
+        time.sleep(0.6)
+        return {"ok": True, "out": "", "why": ""}
+    monkeypatch.setattr(recent.bite, "run_tests", run)
+    monkeypatch.setattr(recent, "TICK", 0.25)
+    monkeypatch.setattr(recent, "PROGRESS", {"start": time.monotonic(), "done": 1, "total": 4})
+    ts = [threading.Thread(target=recent._timed, args=(None, n)) for n in ("a", "b")]
     for t in ts:
         t.start()
     for t in ts:
         t.join()
-    ticks = [ln for ln in capsys.readouterr().out.splitlines() if "still running" in ln]
-    assert ticks and all(ln.strip().startswith("still running 2 checks, ") for ln in ticks), ticks
-    assert len(ticks) <= 3, ticks
+    ticks = [ln.strip() for ln in capsys.readouterr().out.splitlines() if "still" in ln]
+    assert ticks and ticks[0].startswith("still checking: 1 of 4 done, "), ticks
+    assert len(ticks) <= 3, ticks  # one line per tick for both runs, not one per run
 
 
 def test_times_are_spelled_out():
