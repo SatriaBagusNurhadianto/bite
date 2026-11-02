@@ -95,7 +95,8 @@ jobs:
           GAPS: ${{ steps.gather.outputs.gaps }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          if [ -z "$ANTHROPIC_API_KEY" ]; then exit 0; fi
+          if [ -z "$ANTHROPIC_API_KEY" ]; then echo "No ANTHROPIC_API_KEY secret: Bite opens the issue without a test."; exit 0; fi
+          echo "A machine found a change no test noticed ($GAPS). Bite checks it once more here, then asks Claude to write the missing test."
           python -m pip install pytest pytest-xdist
           pipx install .
           pipx inject bite-check claude-agent-sdk > /dev/null
@@ -104,6 +105,7 @@ jobs:
         if: steps.gather.outputs.gaps != ''
         env:
           GH_TOKEN: ${{ github.token }}
+          BITE_HAS_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
         run: |
           python -m pip install pytest
           python bot/self_check.py

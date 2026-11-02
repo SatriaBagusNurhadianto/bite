@@ -24,6 +24,10 @@ New:
 - Bite's own weekly check runs on 20 machines at once, and its tests run 4 at a time (#137).
 - The Action and the workflows Bite suggests use the newest GitHub actions (checkout v7, setup-python v7,
   upload-artifact v7, cache v6, ...), so they no longer warn that Node.js 20 is deprecated (#22).
+- `--write-tests` says what it's doing at each step in plain words ("Asking Claude to write the missing test…",
+  "Running it with the change taken out (it must fail)…", "✅ Test written" or why none was kept), with a line every
+  minute while a step runs. On GitHub Actions the job page gets a table of every change checked, and the weekly
+  self-check gathers one table from all its machines (#PR3).
 
 Fixed:
 - The comeback alarm stays quiet when a later commit did the fix another way, a revert came undone, or a tidy-up
@@ -44,6 +48,8 @@ Fixed:
   long commit titles are cut, and long tests Bite wrote point to their file instead (#131).
 - `.bite.ini` saved by Windows Notepad works; a setting Bite can't use is named in a sentence instead of a Python
   error (#132).
+- The self-check's issue no longer asks for the API key when Bite has one but didn't keep the test it wrote; it
+  says why the test was thrown out (#PR3).
 - The "check it yourself" steps quote file paths with spaces, so they work when pasted (#133).
 - On Windows, Bite's copies keep file names that aren't plain ASCII (`café.py`); before, such a project read as
   "tests already fail" (#134).

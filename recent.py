@@ -1605,6 +1605,29 @@ def guard_worker(cfg, folder: Path, c: dict, diff: str, budget: float) -> dict:
     return last_json(text)
 
 
+def step(text: str) -> None:
+    """One line of --write-tests progress, so a slow step never looks stuck."""
+    print(f"    {text}", flush=True)
+
+
+class heartbeat:
+    """While a slow step runs, a line every minute with how long it's taken and what it has cost so far."""
+    def __init__(self, every: float = 60):
+        self.every, self.stop = every, threading.Event()
+
+    def __enter__(self):
+        t0 = time.time()
+
+        def beat():
+            while not self.stop.wait(self.every):
+                step(f"... still working ({round((time.time() - t0) / 60)} min, ${SPENT[0]:.2f} so far)")
+        threading.Thread(target=beat, daemon=True).start()
+        return self
+
+    def __exit__(self, *exc):
+        self.stop.set()
+
+
 def try_guard(root: Path, c: dict, cfg, budget: float) -> dict:
     """A worker writes the missing test; Bite keeps it only if it passes twice with the change in, fails with the
     change taken out (a real failure, not a test that can't load), and a second fresh check calls it fair."""
@@ -1612,6 +1635,7 @@ def try_guard(root: Path, c: dict, cfg, budget: float) -> dict:
     diff = repo.git(root, "diff", "-M", f"{c['sha']}^", c["sha"], "--", *code_paths(c)) or ""
     folder = export(root, c["sha"], cfg)
     try:
+        step("Claude is reading the change and writing a test ...")
         w = guard_worker(cfg, folder, c, diff[:12000], budget)
         tf = written_test(folder, w)
         if not tf:
@@ -1622,6 +1646,7 @@ def try_guard(root: Path, c: dict, cfg, budget: float) -> dict:
         shutil.rmtree(folder.parent, ignore_errors=True)
     cmd = claim_command(cfg, rel)
     res.update(test_file=rel, run=cmd, test=src.decode("utf-8", "replace"), guards=w.get("guards", ""))
+    step(f"It wrote {rel}. Running it twice with the change in (it must pass) ...")
     for _ in range(2):
         f = export(root, c["sha"], cfg)
         try:
@@ -1631,6 +1656,7 @@ def try_guard(root: Path, c: dict, cfg, budget: float) -> dict:
         if rc not in cfg.ok_codes or ran_nothing(cmd, out):
             res["status"] = "its test failed with the change in"
             return res
+    step("Running it with the change taken out (it must fail) ...")
     f = export(root, c["sha"], cfg)
     try:
         take_out(root, c, f)
@@ -1643,6 +1669,7 @@ def try_guard(root: Path, c: dict, cfg, budget: float) -> dict:
         res["status"] = "its test couldn't load without the change"
     else:
         fail = repo.failure_excerpt(out, 15)
+        step("It failed without the change. A second, fresh check is reading it to see if it's fair ...")
         v = guard_judge(cfg, c, diff, res["test"], fail)
         res["judge"] = v
         if (v.get("verdict") or "").upper() == "FAIR":
@@ -2183,11 +2210,43 @@ def results(cs: list, none: str = "", error: str = "", newest: str = "", tried: 
 LAST_RESULTS = [None]  # the results.json this run wrote, for --json
 
 
+def summary_table(commits: list) -> str:
+    """Every change checked, one row each, as a Markdown table (the GitHub job page shows it)."""
+    if not commits:
+        return ""
+    gaps = sum(r["result"] in ("no_test_noticed", "its_tests_didnt_notice", "undone_later") for r in commits)
+    held = sum(r["result"] == "noticed" for r in commits)
+    rows = ["### Bite: every change checked", "",
+            f"{len(commits)} checked: {held} ✅ a test noticed, {gaps} with no test that notices"
+            + (f", {len(commits) - held - gaps} other" if len(commits) - held - gaps else "") + ".", "",
+            "| Commit | Change | Result |", "|---|---|---|"]
+    icon = {"noticed": "✅", "no_test_noticed": "❌", "its_tests_didnt_notice": "❌", "undone_later": "🔁"}
+    for r in commits:
+        title = short(r.get("subject", "")).replace("|", "\\|")
+        label = r.get("label", "").replace("|", "\\|")
+        label = label if label.startswith(icon.get(r["result"], "")) else f"{icon.get(r['result'], '➖')} {label}"
+        rows.append(f"| `{r['sha'][:8]}` | {title} | {label}"
+                    + (f" (test written: `{r['missing_test']['test_file']}`)" if r.get("missing_test") else "") + " |")
+    return "\n".join(rows) + "\n"
+
+
+def job_summary(commits: list) -> None:
+    """On GitHub Actions, the table goes on the job's page too (GITHUB_STEP_SUMMARY), so nobody has to read the log."""
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if path and commits:
+        try:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(summary_table(commits) + "\n")
+        except OSError:
+            pass
+
+
 def write_results(root: Path, cs: list, none: str = "", error: str = "", newest: str = "", tried: list = ()) -> Path:
     p = proof_dir(root) / "results.json"
     r = results(cs, none, error, newest, tried)
     p.write_text(json.dumps(r, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     write_badge(root, r.get("score"))
+    job_summary(r["commits"])
     LAST_RESULTS[0] = p
     return p
 
@@ -2555,7 +2614,8 @@ def main(argv=None):
         return 0
     if only:  # just the commits named (--only), say the ones a check on several machines found gaps in
         cs = [c for c in cs if any(c["sha"].startswith(s) for s in only)]
-        print(f"  --only: {len(cs)} of them are named", flush=True)
+        print(f"  --only: checking just the {len(cs)} named here" if len(cs) != 1 else "  --only: checking just the one named here",
+              flush=True)
         if not cs:
             print("Nothing to check: no commit that changed code starts with " + ", ".join(only) + ".")
             return 0
@@ -2696,15 +2756,22 @@ def main(argv=None):
     flagged = [c for c in cs if c.get("undo") == "TEST GUARDS NOTHING" or c.get("undo", "").startswith("unguarded")]
     if write_tests and flagged:
         budget, n = opt("--budget", 1.0), opt("--suspects", 3)
-        for c in flagged[:n]:
+        todo = flagged[:n]
+        print(f"\nFound {len(flagged)} change{'s' if len(flagged) != 1 else ''} no test noticed. Asking Claude to write the "
+              f"missing test for {'it' if len(todo) == 1 else f'{len(todo)} of them'} (a few minutes each, ${budget:.2f} cap "
+              "for the whole run):", flush=True)
+        for i, c in enumerate(todo, 1):
             left = budget - SPENT[0]
             if left < 0.15:
-                print("  budget used up")
+                print(f"  Budget used up (${SPENT[0]:.2f} of ${budget:.2f}): the rest get no test this run.", flush=True)
                 break
-            print(f"  writing the missing test for {c['sha'][:8]} ...", flush=True)
-            c["guard"] = try_guard(root, c, cfg, min(left - 0.05, budget / n + 0.10))
-            print(f"    {'wrote one: passes with the change, fails without it' if c['guard']['status'] == 'WRITTEN' else c['guard']['status']}",
-                  flush=True)
+            print(f"  {i} of {len(todo)}: {c['sha'][:8]} \"{short(c['subject'])}\"", flush=True)
+            with heartbeat():
+                c["guard"] = try_guard(root, c, cfg, min(left - 0.05, budget / n + 0.10))
+            g = c["guard"]
+            print(f"    ✅ Test written ({g.get('test_file', '')}): passes with the change, fails without it."
+                  if g["status"] == "WRITTEN" else f"    ✗ No test kept: {g['status']}.", flush=True)
+        print(f"  Spent ${SPENT[0]:.2f}.", flush=True)
     back = [c for c in cs if c.get("undo") == "undone since"]
     for c in back + flagged:
         print(f"{say(c)[1]}: {c['sha'][:8]} \"{short(c['subject'])}\": {flat(say(c)[2])[2:].strip()}")
