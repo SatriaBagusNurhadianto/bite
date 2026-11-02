@@ -19,8 +19,8 @@ jobs:
         with:
           python-version: "3.13"
       # Only the test runner: Bite is installed on its own by the action, so the tests import each copy's code.
-      - run: python -m pip install pytest
+      - run: python -m pip install pytest pytest-xdist
       - uses: ./
         with:
-          # Bite's own tests take over a minute a run: a smaller piece-check budget keeps this check near 5 minutes.
+          # .bite.ini runs the tests 4 at a time; a smaller piece-check budget keeps this check to a few minutes.
           args: --part-runs 2

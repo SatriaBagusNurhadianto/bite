@@ -23,4 +23,5 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: python -m pip install -e .[test]
-      - run: python -m pytest -v
+      # 4 at a time (pytest-xdist): about 4x faster, most of all on Windows, where each test starts slower (#16).
+      - run: python -m pytest -v -n auto
