@@ -1046,6 +1046,7 @@ def check_undo(root: Path, c: dict, cfg) -> str:
             return "tests fail at this commit"
         if ran_nothing(bite.tests_cmd(fcfg), now["out"]):
             return "no tests ran at this commit"
+        bite.cap_hang(fcfg, now)
         take_out(root, c, folder)
         undone = run_tests(fcfg, folder)
 
@@ -1070,6 +1071,7 @@ def check_undo(root: Path, c: dict, cfg) -> str:
                 c["flaky"] = caught_by(undone["out"]) or "a test"
                 return flag()
         c["caught"] = caught_by(undone["out"])
+        hung = not c["caught"] and hang_note(undone, now)
         missed = unnoticed_part(root, c, folder, fcfg)
         if missed and c.get("skip"):
             return f"not flagged: {c['skip']}"
@@ -1091,6 +1093,9 @@ def check_undo(root: Path, c: dict, cfg) -> str:
                 c["caught"], c["gone"] = caught, gone
                 return "guard gone since"
             c["caught"] = caught
+        if hung:
+            c["hang"] = hung
+            return "guarded (tests hang without it)"
         return "guarded" if not crashed else "guarded (tests use the new code)"
     finally:
         shutil.rmtree(folder.parent, ignore_errors=True)
@@ -1259,6 +1264,13 @@ def caught_by(out: str) -> str:
     return f"`{names[0]}`" + (f" and {len(names) - 1} more" if len(names) > 1 else "")
 
 
+def hang_note(undone: dict, now: dict) -> str:
+    """When the tests hung with the change taken out (see bite.cap_hang), that is what noticed it, in words."""
+    if not undone.get("hung"):
+        return ""
+    return f"stopped after {round(undone['secs'])}s; they take {round(now['secs'])}s with it"
+
+
 def closed_since(root: Path, c: dict, cfg) -> bool:
     """A later commit may have closed the gap: on today's code, take this commit's change back out (if it still
     applies) and see whether today's tests now fail where they passed before."""
@@ -1319,11 +1331,13 @@ def today_notices(root: Path, c: dict, cfg):
         now = run_tests(fcfg, folder)
         if not now["ok"] or ran_nothing(bite.tests_cmd(fcfg), now["out"]):
             return None
+        bite.cap_hang(fcfg, now)
         git_apply_ok(folder, diff, "-R", *flags)
         undone = run_tests(fcfg, folder)
         if undone["ok"]:
             return False
-        c["caught"] = caught_by(undone["out"])
+        hung = hang_note(undone, now)
+        c["caught"] = caught_by(undone["out"]) or (f"the tests hang without it: {hung}" if hung else "")
         return None if bite.load_failure(undone["out"]) else True
     finally:
         shutil.rmtree(folder.parent, ignore_errors=True)
@@ -1750,6 +1764,9 @@ def say(c: dict, newest: str = "") -> tuple[str, str, str]:
                 "today's code. **Next:** if that wasn't on purpose, put the fix back with a test that fails without it.")
     if u.startswith("closed since"):
         return "held", "✅ a later test notices", f"✅ A test added in a later commit notices it now{f' ({caught})' if caught else ''}."
+    if u == "guarded (tests hang without it)":
+        return ("held", "✅ tests hang without it", "✅ Without this change your tests hang"
+                f"{f' ({h})' if (h := c.get('hang')) else ''}, so they'd notice if it went.")
     if u == "guarded (tests use the new code)":
         return "held", "✅ tests crash without it", "✅ Without this change your tests crash, so they'd notice if it went."
     if u.startswith("guarded"):
