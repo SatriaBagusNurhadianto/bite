@@ -13,6 +13,20 @@ Bite checks whether an AI coding agent's "fixed" is actually true.
 
 <img alt="bite --demo: one fix is noticed by a test, the other has no test at all" src="https://raw.githubusercontent.com/connabyss/bite/main/assets/bite-demo.svg" width="760">
 
+**Try it on your own repo in one line.** It's free, needs no key, and never changes your files:
+
+```
+cd your-repo
+uvx bite-check --free
+```
+
+No [uv](https://docs.astral.sh/uv/)? `pipx run bite-check --free` does the same with [pipx](https://pipx.pypa.io).
+If your commits never say "fix", add `--any` to check every recent change. To keep Bite installed, see
+[Try it in a minute](#try-it-in-a-minute).
+
+**Here for Hack Week or your first open-source PR?** These [good first issues](https://github.com/connabyss/bite/labels/good%20first%20issue)
+are small, and each one says where to look and when it's done. Comment on one to claim it.
+
 ## Why you need this
 
 When an AI fixes a bug for you, it often says "Fixed, and I added a test." If you don't read code, you can't tell
@@ -258,7 +272,7 @@ jobs:
       # install what your tests need here, e.g. for Python:
       - uses: actions/setup-python@v7
       - run: python -m pip install pytest -r requirements.txt
-      - uses: connabyss/bite@v1.0.1
+      - uses: connabyss/bite@v1.0.2
 ```
 
 Options go under `with:`: `args` (extra `bite` options, e.g. `--serious`), `max-commits` (default 20),
@@ -272,7 +286,7 @@ When no test noticed a change, Bite can write that test for you. Add your Anthro
 named `ANTHROPIC_API_KEY`, then:
 
 ```yaml
-      - uses: connabyss/bite@v1.0.1
+      - uses: connabyss/bite@v1.0.2
         with:
           write-tests: true
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -389,7 +403,7 @@ jobs:
         with:
           fetch-depth: 0
       # install what your tests need here, as in the pull request check
-      - uses: connabyss/bite@v1.0.1
+      - uses: connabyss/bite@v1.0.2
         with:
           badge-branch: bite-badge
           max-commits: 10

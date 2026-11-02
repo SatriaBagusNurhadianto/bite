@@ -3,6 +3,17 @@
 What changed in each Bite release, newest first. Numbers link to the pull request on
 github.com/connabyss/bite. Install or update: `pipx install --force bite-check --pip-args="--no-cache-dir"`.
 
+## 1.0.2 (2026-11-03)
+
+For a newcomer's first run on their own repo. Each of these was a dead end in a walk-through on a small fresh repo:
+- `uvx bite-check --free` and `pipx run bite-check --free` now work: the package name is also a command.
+- Run through uvx, Bite ran the tests with uvx's private Python, which has no pytest and none of the project's
+  packages, and stopped with "pytest isn't installed". It now steps around its own Python and uses the project's.
+- When no commit says it fixed something and none added tests, Bite prints the command that checks them anyway
+  (`bite --free --any`) instead of a hint in brackets.
+- A small repo whose commits changed no code was told "Try a larger --last", though Bite had already seen every
+  commit. It now says so, and what to do next.
+
 ## 1.0.1 (2026-11-02)
 
 Fixed:
