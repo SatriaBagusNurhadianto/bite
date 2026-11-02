@@ -16,8 +16,9 @@ Bite: did your coding agent's recent "done" commits really do what they said?
     bite --quick              faster: skip the piece-by-piece check, the flaky-test rerun and the deleted-test check
                               (--part-runs N: test runs the piece check may use in one run, 6 by default)
     bite --since main         only commits that main doesn't have (the pull request check uses this)
-    bite --shard 2/5          check only every 5th commit, starting with the 2nd: run 5 at once (on 5 machines) to
-                              split a long check; --only 1a2b3c4d,5e6f7a8b checks just those commits
+    bite --shard 2/5          split the check into 5 parts and run part 2. Run parts 1/5 to 5/5 on 5 machines at
+                              once: together they cover every commit, in about a fifth of the time
+    bite --only 1a2b3c4d      check just the commits named (comma-separated)
     bite --json               print the results as JSON for other programs (the rest goes to stderr); they're
                               also saved in bite_proof/results.json on every run
     bite --write-tests        after the free check, write the missing test for each change no test noticed
@@ -2512,7 +2513,7 @@ def main(argv=None):
         kept = []
     free = cs[:opt("--free-checks", 6)]
     part, parts = int(shard[1]), int(shard[2])
-    if parts > 1:  # one of several machines: every parts-th commit, so the slow ones spread out
+    if parts > 1:  # one part of several: every parts-th commit, so slow commits spread across the parts
         free = free[part - 1::parts]
         print(f"  --shard {part}/{parts}: this run checks {len(free)} of them", flush=True)
     print(f"  free check of {len(free)}: each runs the tests with and without the change", flush=True)
