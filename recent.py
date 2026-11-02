@@ -980,15 +980,25 @@ def slow_tip(secs: float, n: int, cfg) -> str:
             f"4/4 splits the check across 4 machines; free_test_command in .bite.ini can point at a faster subset{xdist}.")
 
 
+# Files that pin what the tests run against: a dependency that changed can change what a test notices.
+DEPENDENCY_FILES = ("requirements*.txt", "constraints*.txt", "Pipfile", "Pipfile.lock", "poetry.lock", "uv.lock",
+                    "pdm.lock", "setup.py", ".bite.ini", "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
+                    "bun.lockb", "Cargo.toml", "Cargo.lock", "go.mod", "go.sum", "*.csproj", "*.fsproj", "*.sln",
+                    "Directory.Packages.props", "packages.lock.json", "pom.xml", "build.gradle", "build.gradle.kts",
+                    "settings.gradle", "settings.gradle.kts", "gradle.properties", "*.versions.toml")
+
+
 def checked_key(root: Path, cfg) -> str:
-    """What a ✅ depends on besides the commit itself: today's test files and test setup (a test deleted or
-    weakened since must be asked again), the test commands, the options that change the check, and Bite's version.
+    """What a ✅ depends on besides the commit itself: today's test files, test setup and dependency files (a test
+    deleted or weakened since, or a new version of a library, must be asked again), the test commands, the options that change the check, and Bite's version.
     Read from git, so it costs no test run."""
     import hashlib
+    def counts(path: str) -> bool:
+        name = path.rsplit("/", 1)[-1]
+        return (bite.is_test_file(path, cfg) or any(fnmatch.fnmatch(name, g) for g in cfg.test_setup)
+                or any(fnmatch.fnmatch(name, g) for g in DEPENDENCY_FILES))
     files = [ln for ln in (repo.git(root, "ls-tree", "-r", "HEAD") or "").splitlines()
-             if "\t" in ln and (bite.is_test_file(ln.split("\t", 1)[1], cfg)
-                                 or any(fnmatch.fnmatch(ln.split("\t", 1)[1].rsplit("/", 1)[-1], g)
-                                        for g in cfg.test_setup))]
+             if "\t" in ln and counts(ln.split("\t", 1)[1])]
     parts = [_installed_version(), cfg.test_cmd, getattr(cfg, "free_cmd", ""), str(QUICK[0]), str(PART_RUNS[0]), *files]
     return hashlib.sha256("\n".join(parts).encode("utf-8", "surrogateescape")).hexdigest()[:20]
 

@@ -82,6 +82,37 @@ def test_a_remembered_check_is_asked_again_once_its_test_is_deleted(tmp_path):
     assert "noticed by test_round" not in line(after, fix), after
 
 
+def test_a_remembered_check_is_asked_again_once_its_test_is_weakened(tmp_path):
+    root = project(tmp_path)
+    (root / "shop.py").write_text("def total(xs):\n    return round(sum(xs), 2)\n")
+    (root / "tests" / "test_round.py").write_text("import shop\n\n\ndef test_round():\n"
+                                                  "    assert shop.total([0.1, 0.2]) == 0.3\n")
+    fix = commit(root, "Fix total rounding")
+    assert "noticed by test_round" in line(bite(root), fix)
+    # the test still exists, but no longer checks the rounding the fix added
+    (root / "tests" / "test_round.py").write_text("import shop\n\n\ndef test_round():\n"
+                                                  "    assert shop.total([1, 2]) == 3\n")
+    commit(root, "simplify test")
+    after = bite(root)
+    assert "checked before" not in after, after  # asked again, not taken from memory
+    # and it says what a run with no memory says (Bite checks a fix at its own commit, so a later weakened test
+    # doesn't turn it into a gap; the memory must not change that answer either way)
+    fresh = bite(root, "--again")
+    assert line(after, fix).split()[1:4] == line(fresh, fix).split()[1:4], (after, fresh)
+
+
+def test_a_new_dependency_version_asks_again(tmp_path):
+    root = project(tmp_path)
+    (root / "shop.py").write_text("def total(xs):\n    return round(sum(xs), 2)\n")
+    (root / "tests" / "test_round.py").write_text("import shop\n\n\ndef test_round():\n"
+                                                  "    assert shop.total([0.1, 0.2]) == 0.3\n")
+    fix = commit(root, "Fix total rounding")
+    bite(root)
+    assert "checked before" in bite(root)
+    (root / "requirements.txt").write_text("decimal-helpers==2.0\n")
+    commit(root, "bump a library")
+    assert "checked before" not in bite(root)
+
 def test_a_slow_run_says_what_makes_the_next_one_faster():
     sys.path.insert(0, str(KIT))
     import recent
