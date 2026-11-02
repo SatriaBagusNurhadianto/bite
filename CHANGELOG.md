@@ -3,7 +3,7 @@
 What changed in each Bite release, newest first. Numbers link to the pull request on
 github.com/connabyss/bite. Install or update: `pipx install --force bite-check --pip-args="--no-cache-dir"`.
 
-## Unreleased
+## 1.0.3 (2026-11-03)
 
 For someone who has only Python and has never used a terminal much. A walk-through on Windows found two dead ends:
 `uvx` and `pipx` aren't there on a fresh PC, and the terminal opens in C:\WINDOWS\system32, where Bite only said
