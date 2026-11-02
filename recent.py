@@ -945,24 +945,32 @@ def tests_pass_at(root: Path, sha: str, cfg) -> tuple[bool, str]:
 JOBS = [1]  # --jobs N: how many commits are checked at the same time
 _GATE = threading.Condition()
 _BUSY = [0, False]  # test runs going on side by side, and whether one has the machine to itself
+_SHARED = {}  # each test run going on now: whether another ran beside it at any point
 
 
 def run_tests(fcfg, folder) -> dict:
     """bite.run_tests, and with --jobs, side by side with other commits' runs. Tests run side by side can trip over
     each other (the same port, the same database), and a failure caused by that would read as "a test noticed" and
-    hide a real gap. So with --jobs a failed run counts only if it fails again with the machine to itself."""
+    hide a real gap. So with --jobs a failed run that shared the machine with another run counts only if it fails
+    again with the machine to itself. A run that had the machine to itself anyway (one commit to check, or the
+    others already done) isn't run twice: that only doubled the time of every failing run."""
     if JOBS[0] <= 1:
         return bite.run_tests(fcfg, folder)
+    me = object()
     with _GATE:
         _GATE.wait_for(lambda: not _BUSY[1])
         _BUSY[0] += 1
+        _SHARED[me] = bool(_SHARED)
+        for other in _SHARED:  # every run going on now shares the machine with this one
+            _SHARED[other] = _SHARED[other] or _SHARED[me]
     try:
         r = bite.run_tests(fcfg, folder)
     finally:
         with _GATE:
             _BUSY[0] -= 1
+            shared = _SHARED.pop(me)
             _GATE.notify_all()
-    if r["ok"]:
+    if r["ok"] or not shared:
         return r
     with _GATE:
         _GATE.wait_for(lambda: not _BUSY[1] and not _BUSY[0])
@@ -1019,6 +1027,11 @@ def remember(root: Path, memo: dict) -> None:
     (proof_dir(root) / "checked.json").write_text(json.dumps(memo, indent=1), encoding="utf-8")
 
 
+def doing(c: dict, text: str) -> None:
+    """One line before each test run, so a slow check shows what it is doing instead of going quiet."""
+    print(f"    {c['sha'][:8]} {text}", flush=True)
+
+
 def undo_check(root: Path, c: dict, cfg) -> str:
     """check_undo, but a file Bite can't read or write in one commit's copy (a link, a locked file, a full disk)
     only stops the check of that commit, not the whole run: it shows as couldn't check, with the reason."""
@@ -1040,6 +1053,7 @@ def check_undo(root: Path, c: dict, cfg) -> str:
     if getattr(cfg, "free_cmd", ""):  # the faster subset, for this step only
         fcfg.test_cmd, fcfg.box_test_cmd = cfg.free_cmd, ""
     try:
+        doing(c, "running the tests with the change in...")
         now = run_tests(fcfg, folder)
         if not now["ok"]:
             c["why"] = fail_why(now)
@@ -1048,6 +1062,7 @@ def check_undo(root: Path, c: dict, cfg) -> str:
             return "no tests ran at this commit"
         bite.cap_hang(fcfg, now)
         take_out(root, c, folder)
+        doing(c, f"running them with the change taken out (they took {took(now)} with it in)...")
         undone = run_tests(fcfg, folder)
 
         def flag():  # would be flagged: first rule out the usual harmless reasons
@@ -1066,6 +1081,7 @@ def check_undo(root: Path, c: dict, cfg) -> str:
         if not crashed and not QUICK[0]:
             # Once more: a test that fails now and then (flaky) can fail by luck. Only a test that fails every
             # time the change is out counts as noticing it.
+            doing(c, "a test failed: running them once more, to rule out a test that fails by luck...")
             again = run_tests(fcfg, folder)
             if again["ok"]:
                 c["flaky"] = caught_by(undone["out"]) or "a test"
@@ -1234,7 +1250,7 @@ def unnoticed_part(root: Path, c: dict, folder: Path, fcfg) -> list:
         PART_RUNS[0] -= len(ps)
     news = {rel: repo.git(root, "cat-file", "blob", f"{c['sha']}:{rel}", raw=True) for rel in c["code"]}
     missed = []
-    for p in ps:
+    for n, p in enumerate(ps, 1):
         rel, undone = p[0], p[2]
         for r, b in news.items():  # the whole change back in
             if b is not None:
@@ -1243,6 +1259,7 @@ def unnoticed_part(root: Path, c: dict, folder: Path, fcfg) -> list:
             take_out(root, {**c, "code": [rel]}, folder)  # a file the commit created
         else:
             bite.safe_write(folder, folder / rel, undone)
+        doing(c, f"piece {n} of {len(ps)} ({p[1] + ' in ' if p[1] else ''}{p[0]}) taken out alone: does a test notice it?")
         run = run_tests(fcfg, folder)
         if run["ok"] and not ran_nothing(bite.tests_cmd(fcfg), run["out"]):
             missed.append(p)
@@ -1262,6 +1279,11 @@ def caught_by(out: str) -> str:
     if not names:
         return ""
     return f"`{names[0]}`" + (f" and {len(names) - 1} more" if len(names) > 1 else "")
+
+
+def took(run: dict) -> str:
+    secs = round(run.get("secs") or 0)
+    return f"{secs // 60}m {secs % 60}s" if secs >= 60 else f"{secs}s"
 
 
 def hang_note(undone: dict, now: dict) -> str:
@@ -1328,11 +1350,13 @@ def today_notices(root: Path, c: dict, cfg):
             diff, flags = change_diff(root, c, 0), ["--unidiff-zero"]
         if not diff or not git_apply_ok(folder, diff, "-R", "--check", *flags):
             return None  # today's code moved on: can't tell
+        doing(c, "on today's code: running the tests with the change in...")
         now = run_tests(fcfg, folder)
         if not now["ok"] or ran_nothing(bite.tests_cmd(fcfg), now["out"]):
             return None
         bite.cap_hang(fcfg, now)
         git_apply_ok(folder, diff, "-R", *flags)
+        doing(c, "on today's code: running them with the change taken out...")
         undone = run_tests(fcfg, folder)
         if undone["ok"]:
             return False
