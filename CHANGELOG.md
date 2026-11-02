@@ -50,7 +50,7 @@ Fixed:
   error (#132).
 - A test Bite or its worker wrote now runs when the project's pytest command has an option with a value: `-n auto`
   (pytest-xdist) lost its `auto`, so every claim test and every `--write-tests` test failed to start and was
-  thrown out (#PR4).
+  thrown out (#143).
 - The self-check's issue no longer asks for the API key when Bite has one but didn't keep the test it wrote; it
   says why the test was thrown out (#140).
 - The "check it yourself" steps quote file paths with spaces, so they work when pasted (#133).
