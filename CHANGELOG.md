@@ -17,6 +17,11 @@ New:
 - Rust: a fix tested by a unit test in the same file (`#[cfg(test)] mod tests`) counts as noticed. Go: a change only
   to files built for another system (`x_windows.go`) is skipped, not flagged (#120).
 - README: "Why you need this", in plain words, for people who code with an AI (#129).
+- Faster checks. `--shard 2/5` runs one part of a check, so 5 machines can split it (#137). `--jobs 4` checks 4 changes
+  at a time, and a run that failed alongside others counts only if it fails again on its own. Bite remembers the
+  changes it checked with ✅ and skips them next time, unless a test or setting changed (`--again` checks them all);
+  the Action keeps that memory between runs. A slow run ends with tips to speed it up (#PR2).
+- Bite's own weekly check runs on 20 machines at once, and its tests run 4 at a time (#137).
 
 Fixed:
 - The comeback alarm stays quiet when a later commit did the fix another way, a revert came undone, or a tidy-up

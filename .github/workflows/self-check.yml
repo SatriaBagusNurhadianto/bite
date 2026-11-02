@@ -44,6 +44,12 @@ jobs:
       - run: |
           python -m pip install pytest pytest-xdist
           pipx install .
+      # Commits checked with ✅ on an earlier run, with the same tests and settings, aren't run again.
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: bite_proof/checked.json
+          key: bite-self-check-${{ github.run_id }}
+          restore-keys: bite-self-check-
       - name: Bite checks Bite (part ${{ matrix.part }} of 20)
         env:
           LAST: ${{ inputs.last || '20' }}
@@ -76,6 +82,11 @@ jobs:
       - name: Gather what the machines found
         id: gather
         run: echo "gaps=$(python bot/merge_shards.py parts bite_proof)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        if: hashFiles('bite_proof/checked.json') != ''
+        with:
+          path: bite_proof/checked.json
+          key: bite-self-check-${{ github.run_id }}
       # Only when there's a gap, and only for those commits: write the missing test (the key, capped by --budget).
       - name: Write the missing tests
         if: steps.gather.outputs.gaps != ''

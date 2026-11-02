@@ -39,6 +39,16 @@ runs:
     - name: Install Bite
       shell: bash
       run: pipx install "$GITHUB_ACTION_PATH"
+    # Bite remembers each commit it checked with ✅ (bite_proof/checked.json) and doesn't run it again while the
+    # tests and settings it depends on are the same, so a new push only checks what's new.
+    - name: Remember earlier checks
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+      with:
+        path: bite_proof/checked.json
+        key: bite-checked-${{ github.event.pull_request.number || github.ref_name }}-${{ github.run_id }}
+        restore-keys: |
+          bite-checked-${{ github.event.pull_request.number || github.ref_name }}-
+          bite-checked-
     - name: Run the free check on this pull request's commits
       id: bite
       shell: bash
@@ -127,6 +137,12 @@ runs:
         else
           echo "Bite: no change in this pull request is missing a test." >> "$GITHUB_STEP_SUMMARY"
         fi
+    - name: Keep this run's checks for the next one
+      if: always() && hashFiles('bite_proof/checked.json') != ''
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+      with:
+        path: bite_proof/checked.json
+        key: bite-checked-${{ github.event.pull_request.number || github.ref_name }}-${{ github.run_id }}
     - name: Offer the tests Bite wrote as a download
       if: always() && steps.bite.outputs.tests == 'true'
       uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2

@@ -19,6 +19,10 @@ Bite: did your coding agent's recent "done" commits really do what they said?
     bite --shard 2/5          split the check into 5 parts and run part 2. Run parts 1/5 to 5/5 on 5 machines at
                               once: together they cover every commit, in about a fifth of the time
     bite --only 1a2b3c4d      check just the commits named (comma-separated)
+    bite --jobs 4             check 4 commits at the same time on this machine. A test failing only counts if it
+                              fails again with the machine to itself, so tests that share a port can't hide a gap
+    (A commit checked before with ✅, with the same tests and settings, isn't run again: bite_proof/checked.json.
+     A test deleted since, or a changed test command, makes it run again; --again always does.)
     bite --json               print the results as JSON for other programs (the rest goes to stderr); they're
                               also saved in bite_proof/results.json on every run
     bite --write-tests        after the free check, write the missing test for each change no test noticed
@@ -65,6 +69,7 @@ must use API keys. The commits it checks can come from any coding AI or person.
 import ast
 import asyncio
 import difflib
+import fnmatch
 import io
 import json
 import os
@@ -76,6 +81,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -715,7 +721,7 @@ def doc_example_catches(root: Path, c: dict, folder: Path, fcfg) -> bool:
             changed = True
     if not changed:
         return False
-    names = DOCTEST_FAILED.findall(bite.run_tests(fcfg, folder)["out"])
+    names = DOCTEST_FAILED.findall(run_tests(fcfg, folder)["out"])
     if names:
         c["caught"] = f"`{names[0]}`" + (f" and {len(names) - 1} more" if len(names) > 1 else "")
     return bool(names)
@@ -783,7 +789,7 @@ def doctest_catches(root: Path, c: dict, folder: Path, fcfg) -> bool:
         changed = True
     if not changed:
         return False
-    run = bite.run_tests(fcfg, folder)
+    run = run_tests(fcfg, folder)
     if run["ok"] or bite.load_failure(run["out"]):
         return False
     c["caught"] = caught_by(run["out"]) or "a doctest"
@@ -925,10 +931,77 @@ def tests_pass_at(root: Path, sha: str, cfg) -> tuple[bool, str]:
     if getattr(cfg, "free_cmd", ""):
         fcfg.test_cmd, fcfg.box_test_cmd = cfg.free_cmd, ""
     try:
-        run = bite.run_tests(fcfg, folder)
+        run = run_tests(fcfg, folder)
         return run["ok"], "" if run["ok"] else fail_why(run)
     finally:
         shutil.rmtree(folder.parent, ignore_errors=True)
+
+
+JOBS = [1]  # --jobs N: how many commits are checked at the same time
+_GATE = threading.Condition()
+_BUSY = [0, False]  # test runs going on side by side, and whether one has the machine to itself
+
+
+def run_tests(fcfg, folder) -> dict:
+    """bite.run_tests, and with --jobs, side by side with other commits' runs. Tests run side by side can trip over
+    each other (the same port, the same database), and a failure caused by that would read as "a test noticed" and
+    hide a real gap. So with --jobs a failed run counts only if it fails again with the machine to itself."""
+    if JOBS[0] <= 1:
+        return bite.run_tests(fcfg, folder)
+    with _GATE:
+        _GATE.wait_for(lambda: not _BUSY[1])
+        _BUSY[0] += 1
+    try:
+        r = bite.run_tests(fcfg, folder)
+    finally:
+        with _GATE:
+            _BUSY[0] -= 1
+            _GATE.notify_all()
+    if r["ok"]:
+        return r
+    with _GATE:
+        _GATE.wait_for(lambda: not _BUSY[1] and not _BUSY[0])
+        _BUSY[1] = True
+    try:
+        return bite.run_tests(fcfg, folder)
+    finally:
+        with _GATE:
+            _BUSY[1] = False
+            _GATE.notify_all()
+
+
+def slow_tip(secs: float, n: int, cfg) -> str:
+    """When each commit took over 3 minutes, one line on what makes the next run faster ("" otherwise)."""
+    if secs <= 180 or n < 2 or JOBS[0] > 1:
+        return ""
+    xdist = " (with pytest-xdist installed, -n auto in test_command runs the tests themselves 4 at a time)" \
+        if repo.runs_language(cfg.test_cmd)[0] == "Python" and " -n " not in f" {cfg.test_cmd} " else ""
+    return (f"Tip: each commit took about {round(secs / 60)} minutes. --jobs 4 checks 4 at a time; --shard 1/4 to "
+            f"4/4 splits the check across 4 machines; free_test_command in .bite.ini can point at a faster subset{xdist}.")
+
+
+def checked_key(root: Path, cfg) -> str:
+    """What a ✅ depends on besides the commit itself: today's test files and test setup (a test deleted or
+    weakened since must be asked again), the test commands, the options that change the check, and Bite's version.
+    Read from git, so it costs no test run."""
+    import hashlib
+    files = [ln for ln in (repo.git(root, "ls-tree", "-r", "HEAD") or "").splitlines()
+             if "\t" in ln and (bite.is_test_file(ln.split("\t", 1)[1], cfg)
+                                 or any(fnmatch.fnmatch(ln.split("\t", 1)[1].rsplit("/", 1)[-1], g)
+                                        for g in cfg.test_setup))]
+    parts = [_installed_version(), cfg.test_cmd, getattr(cfg, "free_cmd", ""), str(QUICK[0]), str(PART_RUNS[0]), *files]
+    return hashlib.sha256("\n".join(parts).encode("utf-8", "surrogateescape")).hexdigest()[:20]
+
+
+def remembered(root: Path) -> dict:
+    try:
+        return json.loads((root / "bite_proof" / "checked.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def remember(root: Path, memo: dict) -> None:
+    (proof_dir(root) / "checked.json").write_text(json.dumps(memo, indent=1), encoding="utf-8")
 
 
 def undo_check(root: Path, c: dict, cfg) -> str:
@@ -952,14 +1025,14 @@ def check_undo(root: Path, c: dict, cfg) -> str:
     if getattr(cfg, "free_cmd", ""):  # the faster subset, for this step only
         fcfg.test_cmd, fcfg.box_test_cmd = cfg.free_cmd, ""
     try:
-        now = bite.run_tests(fcfg, folder)
+        now = run_tests(fcfg, folder)
         if not now["ok"]:
             c["why"] = fail_why(now)
             return "tests fail at this commit"
         if ran_nothing(bite.tests_cmd(fcfg), now["out"]):
             return "no tests ran at this commit"
         take_out(root, c, folder)
-        undone = bite.run_tests(fcfg, folder)
+        undone = run_tests(fcfg, folder)
 
         def flag():  # would be flagged: first rule out the usual harmless reasons
             if c.get("skip"):
@@ -977,7 +1050,7 @@ def check_undo(root: Path, c: dict, cfg) -> str:
         if not crashed and not QUICK[0]:
             # Once more: a test that fails now and then (flaky) can fail by luck. Only a test that fails every
             # time the change is out counts as noticing it.
-            again = bite.run_tests(fcfg, folder)
+            again = run_tests(fcfg, folder)
             if again["ok"]:
                 c["flaky"] = caught_by(undone["out"]) or "a test"
                 return flag()
@@ -1133,11 +1206,12 @@ def unnoticed_part(root: Path, c: dict, folder: Path, fcfg) -> list:
     if QUICK[0]:
         return []
     ps = parts(root, c, most=MAX_PARTS)
-    if not 2 <= len(ps) <= min(MAX_PARTS, PART_RUNS[0]):
-        if len(ps) > PART_RUNS[0] and 2 <= len(ps) <= MAX_PARTS:
-            c["parts_skipped"] = len(ps)
-        return []
-    PART_RUNS[0] -= len(ps)
+    with _GATE:  # one budget for the run, shared by commits checked side by side (--jobs)
+        if not 2 <= len(ps) <= min(MAX_PARTS, PART_RUNS[0]):
+            if len(ps) > PART_RUNS[0] and 2 <= len(ps) <= MAX_PARTS:
+                c["parts_skipped"] = len(ps)
+            return []
+        PART_RUNS[0] -= len(ps)
     news = {rel: repo.git(root, "cat-file", "blob", f"{c['sha']}:{rel}", raw=True) for rel in c["code"]}
     missed = []
     for p in ps:
@@ -1149,7 +1223,7 @@ def unnoticed_part(root: Path, c: dict, folder: Path, fcfg) -> list:
             take_out(root, {**c, "code": [rel]}, folder)  # a file the commit created
         else:
             bite.safe_write(folder, folder / rel, undone)
-        run = bite.run_tests(fcfg, folder)
+        run = run_tests(fcfg, folder)
         if run["ok"] and not ran_nothing(bite.tests_cmd(fcfg), run["out"]):
             missed.append(p)
     return [] if len(missed) == len(ps) else missed
@@ -1212,11 +1286,11 @@ def today_notices(root: Path, c: dict, cfg):
         if not diff or subprocess.run(["git", "apply", "-R", "--check", "-"], cwd=folder, input=diff,
                                       capture_output=True).returncode != 0:
             return None  # today's code moved on: can't tell
-        now = bite.run_tests(fcfg, folder)
+        now = run_tests(fcfg, folder)
         if not now["ok"] or ran_nothing(bite.tests_cmd(fcfg), now["out"]):
             return None
         subprocess.run(["git", "apply", "-R", "-"], cwd=folder, input=diff, capture_output=True)
-        undone = bite.run_tests(fcfg, folder)
+        undone = run_tests(fcfg, folder)
         if undone["ok"]:
             return False
         c["caught"] = caught_by(undone["out"])
@@ -2292,8 +2366,8 @@ def demo(argv: list) -> int:
 # Every option main() accepts; each one must be in the help text above (the self-test checks).
 FLAGS = {"--free", "--all", "--any", "--serious", "--again", "--roast", "--demo", "--write-tests", "--json", "--quick"}
 VALUED = {"--last": int, "--free-checks": int, "--suspects": int, "--budget": float, "--since": str, "--part-runs": int,
-          "--shard": str, "--only": str}
-VALUE_EXAMPLE = {"--budget": "1.00", "--since": "main", "--part-runs": 6, "--shard": "2/5", "--only": "1a2b3c4d"}
+          "--shard": str, "--only": str, "--jobs": int}
+VALUE_EXAMPLE = {"--budget": "1.00", "--since": "main", "--part-runs": 6, "--shard": "2/5", "--only": "1a2b3c4d", "--jobs": 4}
 
 
 def extras(root: Path, cfg) -> list:
@@ -2407,6 +2481,7 @@ def main(argv=None):
     ROAST[0] = "--roast" in argv
     QUICK[0] = "--quick" in argv
     PART_RUNS[0] = opt("--part-runs", 6)
+    JOBS[0] = max(1, opt("--jobs", 1))
     shard = re.fullmatch(r"(\d+)/(\d+)", opt("--shard", "1/1"))
     if not shard or not 1 <= int(shard[1]) <= int(shard[2]):
         print(f"Bite: --shard needs which part and how many parts, like --shard 2/5, got {opt('--shard', '')!r}.")
@@ -2517,8 +2592,20 @@ def main(argv=None):
         free = free[part - 1::parts]
         print(f"  --shard {part}/{parts}: this run checks {len(free)} of them", flush=True)
     print(f"  free check of {len(free)}: each runs the tests with and without the change", flush=True)
-    for c in free:
-        c["undo"] = undo_check(root, c, cfg)
+    memo = {} if "--again" in argv else remembered(root)
+    key = checked_key(root, cfg)
+    todo = []
+    for c in free:  # a commit checked before with ✅, with the same tests and settings, isn't run again
+        old = memo.get(c["sha"])
+        if old and old.get("key") == key and not came_back(root, c):
+            c["undo"], c["caught"], c["remembered"] = old["undo"], old.get("caught", ""), True
+        else:
+            todo.append(c)
+    if len(todo) < len(free):
+        print(f"  {len(free) - len(todo)} checked before with the same tests and settings: not run again "
+              "(--again runs them anyway)", flush=True)
+
+    def done(c):
         if c["undo"].startswith("unguarded"):
             c["score"] += 2
         elif c["undo"] == "TEST GUARDS NOTHING":
@@ -2526,7 +2613,29 @@ def main(argv=None):
         print(f"  {c['sha'][:8]} {say(c)[1]:<28} {short(c['subject'])}", flush=True)
         if c.get("why"):  # say what broke, so it's clear whether it's the project or the copy
             print(f"           why: {c['why']}", flush=True)
+        if c["undo"].startswith("guarded") and not c.get("remembered"):
+            memo[c["sha"]] = {"key": key, "undo": c["undo"], "caught": c.get("caught", "")}
+            remember(root, memo)
         save_log(root, kept, cs)
+    for c in free:
+        if c.get("remembered"):
+            done(c)
+    t_free = time.time()
+    if JOBS[0] > 1 and len(todo) > 1:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        print(f"  {min(JOBS[0], len(todo))} at a time (--jobs)", flush=True)
+        with ThreadPoolExecutor(JOBS[0]) as pool:
+            futs = {pool.submit(undo_check, root, c, cfg): c for c in todo}
+            for f in as_completed(futs):
+                futs[f]["undo"] = f.result()
+                done(futs[f])
+    else:
+        for c in todo:
+            c["undo"] = undo_check(root, c, cfg)
+            done(c)
+    tip = slow_tip((time.time() - t_free) / len(todo), len(todo), cfg) if todo else ""
+    if tip:
+        print(f"  {tip}", flush=True)
     last = next((c for c in free if c["sha"] == newest and c["undo"] == "tests fail at this commit"), None)
     if last and top and top != newest:  # later commits changed no code, but one may have fixed the tests
         last["head"] = top
