@@ -24,13 +24,22 @@ def commit(root, msg):
 
 def test_reading_a_big_file_skips_ordinary_text_in_one_go():
     text = ("var total = price * count + tax; // add tax\n" * 120000)  # about 5 MB
-    # CPU time, not the wall clock: the tests run 4 at a time, and on a busy CI machine (macOS) waiting for a
-    # turn made this take 1.8s on the clock. The old way took 1.7s or more of CPU itself, the new one about 0.05s; 0.5s leaves room for slow machines.
-    start = time.process_time()
-    lines = bite.code_lines(text, ".js")
-    took = time.process_time() - start
+
+    def cpu(f):  # CPU time, best of 3: the tests run 4 at a time, so the wall clock also counts waiting for a turn
+        best = None
+        for _ in range(3):
+            start = time.process_time()
+            out = f()
+            took = time.process_time() - start
+            best = took if best is None else min(best, took)
+        return best, out
+
+    took, lines = cpu(lambda: bite.code_lines(text, ".js"))
     assert lines[0] == "var total = price * count + tax; " and len(lines) == 120001
-    assert took < 0.5, f"reading 5 MB of code took {took:.1f}s of CPU"
+    # Measured against a plain loop over every character on the same machine, since CI machines differ a lot in
+    # speed. Here the new way takes about 1.7 such loops, the old way (a character at a time) about 12.
+    loop, _ = cpu(lambda: sum(1 for ch in text if ch == "/"))
+    assert took < 5 * loop, f"reading 5 MB of code took {took:.2f}s of CPU, {took / loop:.1f}x a plain loop over it"
 
 
 def test_reading_fast_still_knows_strings_and_comments():
