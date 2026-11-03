@@ -1001,7 +1001,10 @@ def fail_why(run: dict) -> str:
     when the runner gives them (see caught_by), else the last error line, else how the run ended."""
     out = run["out"]
     msg = re.search(r"^FAILED \S+ - (.+)$", out, re.M)  # pytest's summary line carries the error
-    errs = [ln.strip(" E>") for ln in out.splitlines() if re.search(r"\b\w+(?:Error|Exception)\b:|No module named ", ln)]
+    # tap repeats the error in its escaped diff dump ("+    TypeError: x\\r"): the diff marker and a literal \r or \n
+    # at the end aren't part of the error (node-semver on Windows, 11-03).
+    clean = lambda ln: re.sub(r"(?:\\[rn])+$", "", re.sub(r"^[+-]\s+", "", ln.strip(" E>\t")))  # noqa: E731
+    errs = [clean(ln) for ln in out.splitlines() if re.search(r"\b\w+(?:Error|Exception)\b:|No module named ", ln)]
     err = msg.group(1).strip() if msg else errs[-1] if errs else ""
     who = caught_by(out).replace("`", "")
     return ((f"{who} failed" + (f": {err}" if err else "")) if who else err or run["why"])[:160]

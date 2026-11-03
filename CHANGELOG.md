@@ -5,6 +5,8 @@ github.com/connabyss/bite. Install or update: `pipx install --force bite-check -
 
 ## Unreleased
 
+- `why:` lines no longer end in a literal `\r` or start with a `+` taken from tap's escaped diff dump of the error
+  (node-semver on Windows).
 - When a commit turns out "rewritten later", Bite prints a line saying it's not flagged after all, so the list matches
   the summary.
 - `--only` finds the commits named wherever they are in the history. It used to look only among the last 40,
