@@ -2850,14 +2850,17 @@ def leave_own_python() -> None:
 
 
 def utf8_output() -> None:
-    """Output sent to a file or a pipe in UTF-8. On Windows it was written in the system's code page (cp1252),
-    where ✅ and ⚠️ came out as "?" and a cut-off subject's "…" as a stray byte (marked's run.log). A terminal keeps
-    its own encoding: Python already writes Windows consoles in Unicode."""
+    """Output sent to a file (`bite --free > run.log`) in UTF-8. On Windows it was written in the system's code page
+    (cp1252), where ✅ and ⚠️ came out as "?" and a cut-off subject's "…" as a stray byte (marked's run.log). A
+    terminal keeps its own encoding (Python writes Windows consoles in Unicode), and so does a pipe: the program
+    reading it decodes with the system's code page, and UTF-8 there broke it."""
+    import stat
     for stream in (sys.stdout, sys.stderr):
         try:
-            if not stream.isatty() and (stream.encoding or "").lower().replace("-", "") != "utf8":
+            if stat.S_ISREG(os.fstat(stream.fileno()).st_mode) and \
+                    (stream.encoding or "").lower().replace("-", "") != "utf8":
                 stream.reconfigure(encoding="utf-8", errors="replace")
-        except (AttributeError, OSError, ValueError):
+        except (AttributeError, OSError, ValueError, io.UnsupportedOperation):
             pass  # not a real stream (a test's capture): leave it
 
 
