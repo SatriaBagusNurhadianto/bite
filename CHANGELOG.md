@@ -5,6 +5,9 @@ github.com/connabyss/bite. Install or update: `pipx install --force bite-check -
 
 ## Unreleased
 
+- `--keep-output` saves what the tests printed for each commit, with the change in and taken out, in
+  `bite_proof/output/<commit>.txt`, so you can see why Bite read a run the way it did (asked for while checking
+  eemeli/yaml).
 - A change no test noticed, whose code a later commit in the same run rewrote, is no longer flagged when a test
   notices that rewrite ("rewritten later by <commit>"). A pull request's early drafts no longer look like gaps
   (found on h2 #1329). If the rewrite isn't noticed either, the flag stays.

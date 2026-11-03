@@ -28,6 +28,8 @@ Bite: did your coding agent's recent "done" commits really do what they said?
      A test deleted since, or a changed test command, makes it run again; --again always does.)
     bite --verbose            say what each test run is (change in, change out, the rerun, each piece) instead of
                               one line per finished check
+    bite --keep-output        save what the tests printed, with the change in and taken out, for each commit:
+                              bite_proof/output/<commit>.txt (to see why Bite read a run the way it did)
     bite --json               print the results as JSON for other programs (the rest goes to stderr); they're
                               also saved in bite_proof/results.json on every run
     bite --write-tests        after the free check, write the missing test for each change no test noticed
@@ -1021,6 +1023,7 @@ _ACTIVE = {}  # each test run going on now: when it started
 _TICKER = [None]  # the one thread printing those lines, while any run is going on
 PROGRESS = {"start": 0.0, "done": 0, "total": 0}  # the free check as a whole, for those lines
 VERBOSE = [False]  # --verbose: a line before every test run (change in, change out, reruns, pieces)
+KEEP = [False]  # --keep-output: save each commit's test output in bite_proof/output/
 
 
 def _ticker():
@@ -1153,6 +1156,18 @@ def remember(root: Path, memo: dict) -> None:
     (proof_dir(root) / "checked.json").write_text(json.dumps(memo, indent=1), encoding="utf-8")
 
 
+def keep_output(root: Path, c: dict, what: str, run: dict) -> None:
+    """With --keep-output, add one test run's output to bite_proof/output/<commit>.txt, under a line saying which
+    run it was. Hand-checking how Bite read a run needed a wrapper around the test command before (eemeli/yaml)."""
+    if not KEEP[0] or not run:
+        return
+    d = proof_dir(root) / "output"
+    d.mkdir(exist_ok=True)
+    first = what.endswith("change in")  # each check starts its commit's file afresh
+    with open(d / f"{c['sha'][:8]}.txt", "w" if first else "a", encoding="utf-8", errors="replace") as f:
+        f.write(f"===== {what}: {'passed' if run.get('ok') else 'failed'} =====\n{run.get('out', '')}\n")
+
+
 def doing(c: dict, text: str) -> None:
     """With --verbose, one line before each test run saying what it is. Without it the log stays calm: one line per
     finished check, and a "still checking" line every TICK seconds."""
@@ -1189,6 +1204,7 @@ def check_undo(root: Path, c: dict, cfg) -> str:
             doing(c, "the tests failed with nothing taken out: running them once more, in case that was luck...")
             again = run_tests(fcfg, folder, alone=True)
             now = again if again["ok"] else now
+        keep_output(root, c, "the tests with the change in", now)
         if not now["ok"]:
             c["why"] = fail_why(now)
             return "tests fail at this commit"
@@ -1206,6 +1222,7 @@ def check_undo(root: Path, c: dict, cfg) -> str:
             undone = run_tests(fcfg, folder, confirm=False)
             if undone.get("shared") and (QUICK[0] or bite.load_failure(undone["out"])):
                 undone = run_tests(fcfg, folder, alone=True)
+        keep_output(root, c, "with the change taken out" + (" (only this commit's own tests)" if fast else ""), undone)
 
         def flag():  # would be flagged: first rule out the usual harmless reasons
             if c.get("skip"):
@@ -2839,7 +2856,7 @@ def how_called() -> str:
 
 # Every option main() accepts; each one must be in the help text above (the self-test checks).
 JSON_RUN = [False]  # set while --json runs, so a run outside a repo answers with JSON instead of the demo
-FLAGS = {"--verbose", "--free", "--all", "--any", "--serious", "--again", "--roast", "--demo", "--write-tests", "--json", "--quick"}
+FLAGS = {"--keep-output", "--verbose", "--free", "--all", "--any", "--serious", "--again", "--roast", "--demo", "--write-tests", "--json", "--quick"}
 VALUED = {"--last": int, "--free-checks": int, "--suspects": int, "--budget": float, "--since": str, "--part-runs": int,
           "--shard": str, "--only": str, "--jobs": int}
 VALUE_EXAMPLE = {"--budget": "1.00", "--since": "main", "--part-runs": 6, "--shard": "2/5", "--only": "1a2b3c4d", "--jobs": 4}
@@ -3003,6 +3020,7 @@ def main(argv=None):
     ROAST[0] = "--roast" in argv
     QUICK[0] = "--quick" in argv
     VERBOSE[0] = "--verbose" in argv
+    KEEP[0] = "--keep-output" in argv
     PART_RUNS[0] = opt("--part-runs", 6)
     JOBS[0] = max(1, opt("--jobs", 1))
     shard = re.fullmatch(r"(\d+)/(\d+)", opt("--shard", "1/1"))
