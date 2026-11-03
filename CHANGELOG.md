@@ -5,6 +5,9 @@ github.com/connabyss/bite. Install or update: `pipx install --force bite-check -
 
 ## Unreleased
 
+- JavaScript projects: Bite's copies now sit outside the project, with a link to its `node_modules`, instead of
+  inside `node_modules`. Tools that skip anything under `node_modules` (jest, `@babel/register`, tap) skipped the
+  copies too, so on validator.js every commit showed as "tests already fail" though its tests pass.
 - npm projects: checking a change on today's code (the "its test is gone" check) really takes the change out now.
   Bite's copies sit inside the project's git folder there, and `git apply` changed nothing while saying it worked,
   so every "its test is gone" on an npm project was false (found on dotenv).

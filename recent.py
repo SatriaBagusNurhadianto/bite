@@ -465,6 +465,7 @@ def export(root: Path, sha: str, cfg) -> Path:
     for name in cfg.copy_ignore:  # nothing to do for most repos: ignored files aren't committed
         for p in dest.rglob(name):
             shutil.rmtree(p, ignore_errors=True) if p.is_dir() else None
+    repo.link_node_modules(root, dest)  # after the loop above, which would otherwise remove what the links point to
     return dest
 
 
