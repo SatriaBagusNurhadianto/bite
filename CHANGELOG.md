@@ -5,6 +5,8 @@ github.com/connabyss/bite. Install or update: `pipx install --force bite-check -
 
 ## Unreleased
 
+- When a commit turns out "rewritten later", Bite prints a line saying it's not flagged after all, so the list matches
+  the summary.
 - `--only` finds the commits named wherever they are in the history. It used to look only among the last 40,
   so an older commit got "Nothing to check".
 - JavaScript projects: Bite's copies now sit outside the project, with a link to its `node_modules`, instead of

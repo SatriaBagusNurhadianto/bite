@@ -3240,6 +3240,9 @@ def main(argv=None):
             by = rewritten_by(root, c, free)
             if by:
                 c["undo"] = f"not flagged: rewritten later by {by[:8]}, and a test notices that"
+                # Its line above said no test noticed: say what changed, so the list and the summary agree.
+                print(f"  {c['sha'][:8]} ➖ after all, not flagged: {by[:8]} later rewrote this code, and a test "
+                      "notices that", flush=True)
     if red.get("head") is not None:
         left = [c for c in todo if not c.get("undo")]
         print(f"\nYour tests already fail before Bite changes anything, on the newest commit too ({red['head']}).\n"

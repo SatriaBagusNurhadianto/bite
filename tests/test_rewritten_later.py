@@ -4,6 +4,7 @@ later commit rewrote, when Bite checked that later commit in the same run and a 
 that said. When the rewrite isn't noticed either, the gap stands. No key, no network."""
 
 import json
+import re
 import os
 import subprocess
 import sys
@@ -41,6 +42,10 @@ def test_a_gap_rewritten_later_by_a_noticed_commit_is_skipped(tmp_path):
     assert cs["Fix total rounding to cents"]["result"] == "noticed", (cs, log)
     first = cs["Fix total rounding"]
     assert first["result"] == "skipped" and "rewritten later" in str(first), (first, log)
+    # The line printed while checking said no test noticed it; a later line must say it's not flagged after all,
+    # or the list and the summary disagree (node-semver c570a348 on CH's PC).
+    sha = first["sha"][:8]
+    assert re.search(rf"^  {sha} ➖ after all, not flagged: \w{{8}} later rewrote", log, re.M), log
 
 
 def test_the_gap_stands_when_the_rewrite_isnt_noticed_either(tmp_path):
