@@ -1518,7 +1518,15 @@ def rewritten_by(root: Path, c: dict, free: list) -> str:
 
 
 def git_apply_ok(folder: Path, diff: bytes, *flags: str) -> bool:
-    return subprocess.run(["git", "apply", *flags, "-"], cwd=folder, input=diff, capture_output=True).returncode == 0
+    """git apply on one of Bite's copies. A copy can sit inside the project's own git folder (npm projects: in
+    node_modules/bite_tmp, so Node finds the packages). There, git apply read the patch's paths from the outer
+    project's top, matched nothing, changed nothing, and still said it worked (the dotenv hunt: every "its test is
+    gone" ran today's code unchanged). GIT_CEILING_DIRECTORIES stops git from looking above the copy."""
+    env = {**os.environ, "GIT_CEILING_DIRECTORIES": str(Path(folder).resolve().parent)}
+    env.pop("GIT_DIR", None)
+    env.pop("GIT_WORK_TREE", None)
+    return subprocess.run(["git", "apply", *flags, "-"], cwd=folder, input=diff, capture_output=True,
+                          env=env).returncode == 0
 
 
 def today_notices(root: Path, c: dict, cfg):

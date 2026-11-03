@@ -5,6 +5,9 @@ github.com/connabyss/bite. Install or update: `pipx install --force bite-check -
 
 ## Unreleased
 
+- npm projects: checking a change on today's code (the "its test is gone" check) really takes the change out now.
+  Bite's copies sit inside the project's git folder there, and `git apply` changed nothing while saying it worked,
+  so every "its test is gone" on an npm project was false (found on dotenv).
 - `--keep-output` saves what the tests printed for each commit, with the change in and taken out, in
   `bite_proof/output/<commit>.txt`, so you can see why Bite read a run the way it did (asked for while checking
   eemeli/yaml).
