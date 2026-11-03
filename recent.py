@@ -1146,20 +1146,21 @@ def check_undo(root: Path, c: dict, cfg) -> str:
             return "guarded"  # by a doc example the commit wrote (Rust runs those as tests, pytest when told to)
         if undone["ok"]:
             return flag()
-        crashed = bite.load_failure(undone["out"])
+        crashed, fast = bite.load_failure(undone["out"]), None
         if not crashed and not QUICK[0]:
             # Once more: a test that fails now and then (flaky) can fail by luck. Only a test that fails every
             # time the change is out counts as noticing it.
             doing(c, "good sign, a test noticed the change was gone: running them once more to make sure it wasn't luck"
                      + (" (alone, so the other check running beside it can't be the cause)..." if undone.get("shared") else "..."))
-            again = run_tests(fcfg, folder, alone=bool(undone.get("shared")))
+            fast = failed_again(root, c, folder, fcfg, undone["out"], alone=bool(undone.get("shared")))
+            again = {"ok": False} if fast else run_tests(fcfg, folder, alone=bool(undone.get("shared")))
             if again["ok"]:
                 if not undone.get("shared"):  # beside another run, it may have been the other run's doing
                     c["flaky"] = caught_by(undone["out"]) or "a test"
                 return flag()
         c["caught"] = caught_by(undone["out"])
         hung = not c["caught"] and hang_note(undone, now)
-        missed = unnoticed_part(root, c, folder, fcfg)
+        missed = unnoticed_part(root, c, folder, fcfg, fast)
         if missed and c.get("skip"):
             return f"not flagged: {c['skip']}"
         caught, still = c["caught"], []
@@ -1304,12 +1305,13 @@ def set_part(c: dict, missed: list) -> None:
             c["part_undo"][rel] = without(a, b, [op for p in mine for op in p[3][2]])
 
 
-def unnoticed_part(root: Path, c: dict, folder: Path, fcfg) -> list:
+def unnoticed_part(root: Path, c: dict, folder: Path, fcfg, fast=None) -> list:
     """With the whole change out a test failed. Does one fail with each piece of it out alone? A commit can bundle
     a tested change with an untested one (or add a helper that a test only calls): the tested piece shouldn't vouch
     for the rest. Returns the pieces no test noticed (as parts gives them), or [] when every piece was noticed, the
     commit is one piece, or it has too many to try. When no piece alone is noticed, the pieces only count together,
-    so that says nothing either."""
+    so that says nothing either. fast: failed_again's command that runs only the tests that noticed the whole
+    change; a piece they notice needs no whole-suite run."""
     if QUICK[0]:
         return []
     ps = parts(root, c, most=MAX_PARTS)
@@ -1331,7 +1333,9 @@ def unnoticed_part(root: Path, c: dict, folder: Path, fcfg) -> list:
         else:
             bite.safe_write(folder, folder / rel, undone)
         doing(c, f"piece {n} of {len(ps)} ({p[1] + ' in ' if p[1] else ''}{p[0]}) taken out alone: does a test notice it?")
-        run = run_tests(fcfg, folder)
+        run = run_tests(fast, folder) if fast else {"ok": True}
+        if run["ok"]:  # only the tests that noticed the whole change ran (or none): the whole suite decides
+            run = run_tests(fcfg, folder)
         if run["ok"] and not ran_nothing(bite.tests_cmd(fcfg), run["out"]):
             missed.append(p)
     return [] if len(missed) == len(ps) else missed
@@ -1539,6 +1543,45 @@ def judge(cfg, c: dict, diff: str, test: str, fail: str) -> dict:
     msg = f"{c['subject']}\n\n{c['body']}"[:3000]
     text, _ = asyncio.run(_agent(opts, JUDGE_PROMPT.format(msg=msg, diff=diff[:8000], test=test[:4000], fail=fail[:3000])))
     return last_json(text)
+
+
+FAILED_ID = re.compile(r"^(?:FAILED|ERROR) (\S+::[^\s\"]+)", re.M)  # pytest's summary: FAILED tests/t.py::test_x - ...
+
+
+def failed_only(fcfg, folder: Path, out: str):
+    """A copy of fcfg whose test command runs only the pytest tests that failed in out, or None when that can't be
+    told (not pytest, tests in a box, no test named, a file that failed to load, or too many to list). Rerunning
+    only those tests answers "do they fail again?" in seconds instead of a whole suite's run."""
+    cmd = bite.tests_cmd(fcfg)
+    if "pytest" not in cmd or fcfg.contain or bite.load_failure(out):
+        return None
+    ids = list(dict.fromkeys(FAILED_ID.findall(out)))
+    if not ids or len(ids) > 40:
+        return None
+    sub = at(fcfg, folder)
+    sub.test_cmd = pytest_one_file(cmd, " ".join(f'"{i}"' for i in ids), Path(folder))
+    sub.box_test_cmd = ""
+    return sub
+
+
+def failed_again(root: Path, c: dict, folder: Path, fcfg, out: str, alone: bool = False):
+    """The luck check, fast: with the change still out, run only the pytest tests that failed in out. If they fail
+    again, run them once more with the change back in, where they must pass: a test that fails when run on its
+    own (it needs another test to set something up first) would otherwise look like it noticed the change.
+    Returns the test command that runs just those tests when both hold (the piece check uses it too), or None
+    when the whole suite has to answer. The folder is left with the change out, as it was."""
+    sub = failed_only(fcfg, folder, out)
+    if sub is None:
+        return None
+    if run_tests(sub, folder, alone=alone)["ok"]:
+        return None  # they passed this time: only the whole suite can tell luck from tests that clash
+    for rel in c["code"]:  # the change back in
+        b = repo.git(root, "cat-file", "blob", f"{c['sha']}:{rel}", raw=True)
+        if b is not None:
+            bite.safe_write(folder, folder / rel, b)
+    base = run_tests(sub, folder, alone=alone)
+    take_out(root, c, folder)
+    return sub if base["ok"] and not ran_nothing(bite.tests_cmd(sub), base["out"]) else None
 
 
 def pytest_one_file(cmd: str, rel: str, project: Path) -> str:

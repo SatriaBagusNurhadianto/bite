@@ -3,6 +3,14 @@
 What changed in each Bite release, newest first. Numbers link to the pull request on
 github.com/connabyss/bite. Install or update: `pipx install --force bite-check --pip-args="--no-cache-dir"`.
 
+## Unreleased
+
+- Faster for pytest projects. Once a test notices a change is gone, the luck check (run once more) and the piece
+  check (each piece of the change taken out alone) run only the tests that noticed, not the whole suite. A commit
+  with 2 pieces used to cost 5 whole-suite runs and now costs 2, plus a few runs of just those tests. Results stay
+  the same: those tests also run once with the change back in, where they must pass, and whenever they pass with a
+  piece out, the whole suite decides as before.
+
 ## 1.0.3 (2026-11-03)
 
 For someone who has only Python and has never used a terminal much. A walk-through on Windows found two dead ends:
