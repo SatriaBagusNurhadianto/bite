@@ -1546,20 +1546,54 @@ def judge(cfg, c: dict, diff: str, test: str, fail: str) -> dict:
 
 
 FAILED_ID = re.compile(r"^(?:FAILED|ERROR) (\S+::[^\s\"]+)", re.M)  # pytest's summary: FAILED tests/t.py::test_x - ...
+GO_FAILED = re.compile(r"^\s*--- FAIL: ([A-Za-z_]\w*)", re.M)  # go test: --- FAIL: TestTotal (0.00s), subtests TestX/case
+CARGO_FAILED = re.compile(r"^test (\S+) \.\.\. FAILED$", re.M)  # cargo test: test tests::rounds ... FAILED
+DOTNET_FAILED = re.compile(r"^\s*Failed (\S+) \[", re.M)  # dotnet test: "  Failed Shop.Tests.Rounds [12 ms]"
+ONE_COMMAND = re.compile(r"[;&|<>`]|\$\(")  # a test command that is more than one command: Bite can't tell where to add names
+
+
+def only_these(cmd: str, out: str, folder: Path) -> str:
+    """The test command changed to run only the tests that failed in out, or "" when that can't be told safely.
+    pytest: the failed test ids. go test: -run with the failed tests' names (a subtest's parent test reruns it).
+    cargo test: those names with --exact. dotnet test: a --filter of their full names. Others (npm test, Maven,
+    Gradle) print failures too many ways to pick them out safely, so the whole suite answers there."""
+    def names(pattern, ok=r"[\w:.]+"):
+        found = list(dict.fromkeys(pattern.findall(out)))
+        return found if found and len(found) <= 40 and all(re.fullmatch(ok, n) for n in found) else []
+    if "pytest" in cmd:
+        ids = names(FAILED_ID, r"\S+")
+        return pytest_one_file(cmd, " ".join(f'"{i}"' for i in ids), folder) if ids else ""
+    if ONE_COMMAND.search(cmd):
+        return ""
+    if re.match(r"\s*go\s+test\b", cmd):
+        ids = names(GO_FAILED, r"\w+")
+        cmd = re.sub(r"\s-run(?:=|\s+)(\"[^\"]*\"|'[^']*'|\S+)", "", cmd)
+        return cmd.replace("go test", f'go test -run "^({"|".join(ids)})$"', 1) if ids else ""
+    if re.match(r"\s*cargo\s+test\b", cmd):
+        ids = names(CARGO_FAILED)
+        if not ids or re.search(r"\s--(?:exact|skip)\b", cmd):
+            return ""
+        sep = "" if re.search(r"(?:^|\s)--(?:\s|$)", cmd) else " --"  # names go to the test binary, after --
+        return f"{cmd}{sep} --exact {' '.join(ids)}"
+    if re.match(r"\s*dotnet(?:\.exe)?\s+test\b", cmd):
+        ids = names(DOTNET_FAILED, r"[\w.]+")
+        cmd = re.sub(r'\s--filter(\s+|=)("[^"]*"|\S+)', "", cmd)
+        return f'{cmd} --filter "{"|".join("FullyQualifiedName=" + i for i in ids)}"' if ids else ""
+    return ""
 
 
 def failed_only(fcfg, folder: Path, out: str):
-    """A copy of fcfg whose test command runs only the pytest tests that failed in out, or None when that can't be
-    told (not pytest, tests in a box, no test named, a file that failed to load, or too many to list). Rerunning
-    only those tests answers "do they fail again?" in seconds instead of a whole suite's run."""
+    """A copy of fcfg whose test command runs only the tests that failed in out, or None when that can't be told
+    (a runner only_these doesn't know, tests in a box, no test named, a file that failed to load, or too many to
+    list). Rerunning only those tests answers "do they fail again?" in seconds instead of a whole suite's run."""
     cmd = bite.tests_cmd(fcfg)
-    if "pytest" not in cmd or fcfg.contain or bite.load_failure(out):
+    if fcfg.contain or bite.load_failure(out):
         return None
-    ids = list(dict.fromkeys(FAILED_ID.findall(out)))
-    if not ids or len(ids) > 40:
+    fast = only_these(cmd, out, Path(folder))
+    if not fast:
         return None
     sub = at(fcfg, folder)
-    sub.test_cmd = pytest_one_file(cmd, " ".join(f'"{i}"' for i in ids), Path(folder))
+    sub.test_cmd = fast
     sub.box_test_cmd = ""
     return sub
 
