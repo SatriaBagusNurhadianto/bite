@@ -1872,7 +1872,7 @@ def try_guard(root: Path, c: dict, cfg, budget: float) -> dict:
         if rc not in cfg.ok_codes or ran_nothing(cmd, out):
             res["status"] = "its test failed with the change in"
             return res
-    step("Running it with the change taken out (it must fail) ...")
+    step("Running it with the change taken out (this time it should fail: that shows it catches the bug) ...")
     f = export(root, c["sha"], cfg)
     try:
         take_out(root, c, f)
@@ -1885,7 +1885,7 @@ def try_guard(root: Path, c: dict, cfg, budget: float) -> dict:
         res["status"] = "its test couldn't load without the change"
     else:
         fail = repo.failure_excerpt(out, 15)
-        step("It failed without the change. A second, fresh check is reading it to see if it's fair ...")
+        step("Good: it failed without the change, so it catches the bug. A second, fresh check is reading it to see if it's fair ...")
         v = guard_judge(cfg, c, diff, res["test"], fail)
         res["judge"] = v
         if (v.get("verdict") or "").upper() == "FAIR":
@@ -2229,7 +2229,7 @@ color:var(--bg);background:var(--gap);border-radius:4px;padding:2px 7px;margin-b
 {f'<h2>Claims tested</h2><table>{claims}</table>' if tried else ""}
 <h2>If this change disappeared, would any test notice?</h2>
 {f'<table>{rows}</table>' if rows else '<p class="sub">No commits were checked.</p>'}
-<footer>"Held" means a test fails when the change is taken out. It doesn't prove the commit has no other bugs.
+<footer>✅ means a test failed when Bite took the change out. That's the good result: the test caught it, so it will warn you if the change ever breaks. It doesn't prove the commit has no other bugs.
 Details and rerun commands are in the other files in this folder. Made by <a href="https://github.com/connabyss/bite">Bite</a>.</footer>
 </main>
 """
@@ -3065,6 +3065,8 @@ def main(argv=None):
         print(f"{say(c)[1]}: {c['sha'][:8]} \"{short(c['subject'])}\": {flat(say(c)[2])[2:].strip()}")
     checked = [c for c in cs if c.get("undo")]
     held = [c for c in checked if c["undo"].startswith(("guarded", "closed since"))]
+    if held:  # a newcomer reads "failed" as bad: here it's the result you want
+        print("\n✅ means that with the change taken out, a test failed. That's the good result: your tests caught it.")
     print(f"\nChecked {len(checked)} commit(s): a test noticed {len(held)}, no test noticed {len(flagged)}, "
           + (f"undone by a later commit {len(back)}, " if back else "")
           + f"{len(checked) - len(held) - len(flagged) - len(back)} couldn't be checked or skipped"

@@ -141,7 +141,8 @@ def say(r: dict) -> str:
                 f"({r['hang']}).")
     if s == "guarded":
         who = f" ({r['caught']})" if r.get("caught") else ""
-        return f"Bite ✅ a test noticed: with the change to {files(r['code'])} taken out, the tests fail{who}."
+        return (f"Bite ✅ a test noticed, good news: with the change to {files(r['code'])} taken out, a test "
+                f"failed{who}. That failure is the good result: if this change ever breaks, that test will warn you.")
     if s == "tests_blind":
         return (f"Bite ⚠️ the tests that came with this change ({files(r['test_code'])}) don't notice it: with the "
                 f"change to {files(r['code'])} taken out, they still pass. The \"fixed\" isn't proven yet.")
