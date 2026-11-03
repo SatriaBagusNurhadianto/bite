@@ -4,7 +4,10 @@ Bite: did your coding agent's recent "done" commits really do what they said?
     bite                      check the last 40 commits (step 2 needs an API key)
     bite --version            print the installed version, and the line to update when a newer one is out
     bite --free               step 1 only: no key, no cost
-    bite --demo               try it on a tiny made-up project first (free, about 30 seconds)
+    bite --demo               try it on a tiny made-up project first (free, about 30 seconds); run outside a
+                              project, plain bite does the same
+    bite --free path/to/repo  check that project without going into its folder first (you can drag the folder
+                              into the terminal window to type its path)
     bite --demo comeback      see the comeback alarm: a later commit quietly undoes a fix, and Bite names it
     bite --last 80 --suspects 3 --budget 1.00
     bite --serious            only fix claims about data, money, logins, security, crashes or leaks
@@ -23,6 +26,8 @@ Bite: did your coding agent's recent "done" commits really do what they said?
                               fails again with the machine to itself, so tests that share a port can't hide a gap
     (A commit checked before with ✅, with the same tests and settings, isn't run again: bite_proof/checked.json.
      A test deleted since, or a changed test command, makes it run again; --again always does.)
+    bite --verbose            say what each test run is (change in, change out, the rerun, each piece) instead of
+                              one line per finished check
     bite --json               print the results as JSON for other programs (the rest goes to stderr); they're
                               also saved in bite_proof/results.json on every run
     bite --write-tests        after the free check, write the missing test for each change no test noticed
@@ -948,6 +953,54 @@ _BUSY = [0, False]  # test runs going on side by side, and whether one has the m
 _SHARED = {}  # each test run going on now: whether another ran beside it at any point
 
 
+TICK = 30  # seconds between "still running" lines while test runs go on
+_ACTIVE = {}  # each test run going on now: when it started
+_TICKER = [None]  # the one thread printing those lines, while any run is going on
+PROGRESS = {"start": 0.0, "done": 0, "total": 0}  # the free check as a whole, for those lines
+VERBOSE = [False]  # --verbose: a line before every test run (change in, change out, reruns, pieces)
+
+
+def _ticker():
+    """Every TICK seconds, one line for all the test runs going on (one per commit with --jobs), so a slow suite
+    doesn't look stuck. Ends when none is left."""
+    while True:
+        with _GATE:
+            if _GATE.wait_for(lambda: not _ACTIVE, timeout=TICK):  # the last run ended: stop now, not a tick later
+                _TICKER[0] = None
+                return
+            now = time.monotonic()
+            if PROGRESS["total"]:
+                line = (f"still checking: {PROGRESS['done']} of {PROGRESS['total']} done, "
+                        f"{spelled(now - PROGRESS['start'])} so far...")
+            else:
+                line = f"still running the tests, {spelled(now - min(_ACTIVE.values()))} so far..."
+        print(f"  {line}", flush=True)
+
+
+def spelled(secs: float) -> str:
+    """A time in words a newcomer reads at a glance: "45 sec", "2 min", "3 min 30 sec" (not "3m 30s")."""
+    secs = round(secs)
+    if secs < 60:
+        return f"{secs} sec"
+    return f"{secs // 60} min" + (f" {secs % 60} sec" if secs % 60 else "")
+
+
+def _timed(fcfg, folder) -> dict:
+    """bite.run_tests, counted in the "still running" lines while it goes on."""
+    me = object()
+    with _GATE:
+        _ACTIVE[me] = time.monotonic()
+        if _TICKER[0] is None:
+            _TICKER[0] = threading.Thread(target=_ticker, daemon=True)
+            _TICKER[0].start()
+    try:
+        return bite.run_tests(fcfg, folder)
+    finally:
+        with _GATE:
+            del _ACTIVE[me]
+            _GATE.notify_all()
+
+
 def run_tests(fcfg, folder, alone: bool = False, confirm: bool = True) -> dict:
     """bite.run_tests, and with --jobs, side by side with other commits' runs. Tests run side by side can trip over
     each other (the same port, the same database), and a failure caused by that would read as "a test noticed" and
@@ -957,7 +1010,7 @@ def run_tests(fcfg, folder, alone: bool = False, confirm: bool = True) -> dict:
     alone: run it with the machine to itself straight away. confirm=False: return a failed shared run as it is
     (marked "shared"), for a caller whose next run (alone) confirms it anyway."""
     if JOBS[0] <= 1:
-        return bite.run_tests(fcfg, folder)
+        return _timed(fcfg, folder)
     if alone:
         return _run_alone(fcfg, folder)
     me = object()
@@ -968,7 +1021,7 @@ def run_tests(fcfg, folder, alone: bool = False, confirm: bool = True) -> dict:
         for other in _SHARED:  # every run going on now shares the machine with this one
             _SHARED[other] = _SHARED[other] or _SHARED[me]
     try:
-        r = bite.run_tests(fcfg, folder)
+        r = _timed(fcfg, folder)
     finally:
         with _GATE:
             _BUSY[0] -= 1
@@ -986,7 +1039,7 @@ def _run_alone(fcfg, folder) -> dict:
         _GATE.wait_for(lambda: not _BUSY[1] and not _BUSY[0])
         _BUSY[1] = True
     try:
-        return bite.run_tests(fcfg, folder)
+        return _timed(fcfg, folder)
     finally:
         with _GATE:
             _BUSY[1] = False
@@ -1038,8 +1091,10 @@ def remember(root: Path, memo: dict) -> None:
 
 
 def doing(c: dict, text: str) -> None:
-    """One line before each test run, so a slow check shows what it is doing instead of going quiet."""
-    print(f"    {c['sha'][:8]} {text}", flush=True)
+    """With --verbose, one line before each test run saying what it is. Without it the log stays calm: one line per
+    finished check, and a "still checking" line every TICK seconds."""
+    if VERBOSE[0]:
+        print(f"    {c['sha'][:8]} {text}", flush=True)
 
 
 def undo_check(root: Path, c: dict, cfg) -> str:
@@ -1095,7 +1150,7 @@ def check_undo(root: Path, c: dict, cfg) -> str:
         if not crashed and not QUICK[0]:
             # Once more: a test that fails now and then (flaky) can fail by luck. Only a test that fails every
             # time the change is out counts as noticing it.
-            doing(c, "a test failed: running them once more, to rule out a test that fails by luck"
+            doing(c, "good sign, a test noticed the change was gone: running them once more to make sure it wasn't luck"
                      + (" (alone, so the other check running beside it can't be the cause)..." if undone.get("shared") else "..."))
             again = run_tests(fcfg, folder, alone=bool(undone.get("shared")))
             if again["ok"]:
@@ -1298,8 +1353,7 @@ def caught_by(out: str) -> str:
 
 
 def took(run: dict) -> str:
-    secs = round(run.get("secs") or 0)
-    return f"{secs // 60}m {secs % 60}s" if secs >= 60 else f"{secs}s"
+    return spelled(run.get("secs") or 0)
 
 
 def hang_note(undone: dict, now: dict) -> str:
@@ -2516,12 +2570,30 @@ def demo(argv: list) -> int:
         rc = main(["--free", *(a for a in argv if a not in ("--demo", "--free", "comeback"))])
     finally:
         os.chdir(here)
-    print("\nThat was the demo; nothing of yours was touched. To check your own project: go into it and run bite --free")
+    print("\nThat was the demo; nothing of yours was touched.\n"
+          f"To check your own project: type  {how_called()} --free  and a space, drag your project's folder into this\n"
+          "window (that types its path for you), then press Enter.")
     return rc
 
 
+def how_called() -> str:
+    """The command this run was started with, as a person would type it again: bite, bite-check, pipx run bite-check,
+    uvx bite-check, python -m bite_check or python recent.py."""
+    exe, name = sys.executable.replace("\\", "/").lower(), Path(sys.argv[0] if sys.argv else "bite").name.lower()
+    if name in ("bite_check.py", "__main__.py"):
+        return "python -m bite_check"
+    if name.endswith(".py"):
+        return f"python {name}"
+    if "/pipx/" in exe and "/.cache/" in exe:  # pipx run keeps its throwaway environments in pipx's .cache
+        return "pipx run bite-check"
+    if "/uv/" in exe and ("/archive-v" in exe or "/cache/" in exe):  # uvx: uv's cache
+        return "uvx bite-check"
+    return "bite-check" if name.startswith("bite-check") else "bite"
+
+
 # Every option main() accepts; each one must be in the help text above (the self-test checks).
-FLAGS = {"--free", "--all", "--any", "--serious", "--again", "--roast", "--demo", "--write-tests", "--json", "--quick"}
+JSON_RUN = [False]  # set while --json runs, so a run outside a repo answers with JSON instead of the demo
+FLAGS = {"--verbose", "--free", "--all", "--any", "--serious", "--again", "--roast", "--demo", "--write-tests", "--json", "--quick"}
 VALUED = {"--last": int, "--free-checks": int, "--suspects": int, "--budget": float, "--since": str, "--part-runs": int,
           "--shard": str, "--only": str, "--jobs": int}
 VALUE_EXAMPLE = {"--budget": "1.00", "--since": "main", "--part-runs": 6, "--shard": "2/5", "--only": "1a2b3c4d", "--jobs": 4}
@@ -2607,8 +2679,12 @@ def main(argv=None):
         import contextlib
         out, argv = sys.stdout, [a for a in argv if a != "--json"]
         LAST_RESULTS[0] = None
-        with contextlib.redirect_stdout(sys.stderr):
-            rc = main(argv)
+        JSON_RUN[0] = True
+        try:
+            with contextlib.redirect_stdout(sys.stderr):
+                rc = main(argv)
+        finally:
+            JSON_RUN[0] = False
         if LAST_RESULTS[0]:
             out.write(LAST_RESULTS[0].read_text(encoding="utf-8"))
         else:
@@ -2636,7 +2712,7 @@ def main(argv=None):
     if "-h" in argv or "--help" in argv:
         print(__doc__.strip())
         return 0
-    i = 0
+    i, folder = 0, None
     while i < len(argv):  # a typo must not fall through to the paid step
         if argv[i] in VALUED and i + 1 >= len(argv):
             print(f"Bite: {argv[i]} needs a value after it, like {argv[i]} {VALUE_EXAMPLE.get(argv[i], 10)}.")
@@ -2655,12 +2731,16 @@ def main(argv=None):
             i += 2
         elif argv[i] in FLAGS or (argv[i] == "comeback" and i and argv[i - 1] == "--demo"):
             i += 1
+        elif folder is None and not argv[i].startswith("-") and Path(argv[i].strip("\"'")).is_dir():
+            # The project's folder, so nobody has to cd first: dragging a folder into the window types its path.
+            folder = argv.pop(i).strip("\"'")
         else:
             print(f"Bite: unknown option {argv[i]!r}. Run bite --help for the options.")
             return 2
     opt = lambda k, d: type(d)(argv[argv.index(k) + 1]) if k in argv else d  # noqa: E731
     ROAST[0] = "--roast" in argv
     QUICK[0] = "--quick" in argv
+    VERBOSE[0] = "--verbose" in argv
     PART_RUNS[0] = opt("--part-runs", 6)
     JOBS[0] = max(1, opt("--jobs", 1))
     shard = re.fullmatch(r"(\d+)/(\d+)", opt("--shard", "1/1"))
@@ -2674,10 +2754,20 @@ def main(argv=None):
         return 1
     if "--demo" in argv:
         return demo(argv)
-    root = repo.repo_root(os.getcwd())
+    root = repo.repo_root(folder or os.getcwd())
     if root is None:
-        print("Bite: not inside a git repository.")
-        return 1
+        if folder:
+            print(f"Bite: {folder} isn't a project with git history (not inside a git repository), so there's\n"
+                  "nothing to check there. Pick the folder you cloned or made with git, the one with your code in it.")
+            return 1
+        if JSON_RUN[0]:
+            print("Bite: not inside a git repository.")
+            return 1
+        # A first run from wherever the terminal opened (C:\WINDOWS\system32, the home folder): show what Bite
+        # does on a made-up project instead of stopping, and say how to point it at a real one.
+        print(f"Bite: this folder ({os.getcwd()}) isn't a project with git history (not inside a git repository),\n"
+              "so here's Bite's demo on a tiny made-up project instead.\n", flush=True)
+        return demo(["--demo"])
     try:
         cfg = repo.load_cfg(root)
     except repo.ConfigError as e:
@@ -2794,6 +2884,7 @@ def main(argv=None):
               "(--again runs them anyway)", flush=True)
 
     def done(c):
+        PROGRESS["done"] += 1
         if c["undo"].startswith("unguarded"):
             c["score"] += 2
         elif c["undo"] == "TEST GUARDS NOTHING":
@@ -2805,6 +2896,7 @@ def main(argv=None):
             memo[c["sha"]] = {"key": key, "undo": c["undo"], "caught": c.get("caught", "")}
             remember(root, memo)
         save_log(root, kept, cs)
+    PROGRESS.update(start=time.monotonic(), done=0, total=len(free))
     for c in free:
         if c.get("remembered"):
             done(c)
@@ -2821,6 +2913,7 @@ def main(argv=None):
         for c in todo:
             c["undo"] = undo_check(root, c, cfg)
             done(c)
+    PROGRESS["total"] = 0
     tip = slow_tip((time.time() - t_free) / len(todo), len(todo), cfg) if todo else ""
     if tip:
         print(f"  {tip}", flush=True)
@@ -2918,7 +3011,7 @@ def main(argv=None):
               f"Badge for your README: {BADGE}")
     if flagged:
         print(f"Each change no test noticed, with a check you can rerun and a note for your coding AI: {write_free(root, cfg, flagged)}")
-    print(f"\n{time.time() - t0:.0f}s, ${SPENT[0]:.2f}")
+    print(f"\nTook {spelled(time.time() - t0)}, spent ${SPENT[0]:.2f}.")
     save_log(root, tried, cs)
     save_missing_tests(root, flagged)
     write_comment(root, cs, newest=newest, tried=tried)

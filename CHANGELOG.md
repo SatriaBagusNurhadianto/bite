@@ -3,6 +3,24 @@
 What changed in each Bite release, newest first. Numbers link to the pull request on
 github.com/connabyss/bite. Install or update: `pipx install --force bite-check --pip-args="--no-cache-dir"`.
 
+## 1.0.3 (2026-11-03)
+
+For someone who has only Python and has never used a terminal much. A walk-through on Windows found two dead ends:
+`uvx` and `pipx` aren't there on a fresh PC, and the terminal opens in C:\WINDOWS\system32, where Bite only said
+"not inside a git repository".
+- `python -m bite_check --free` runs Bite after a plain `python -m pip install bite-check`, even when pip's command
+  folder isn't on PATH. It ignores a project's own file named recent.py.
+- Run outside a project, Bite shows its demo on a made-up project instead of stopping, then says how to check your
+  own: type the same line and drag the project's folder into the window.
+- A folder after the options checks that project without `cd` first: `bite --free C:\code\my-app`. A folder that
+  has no git history gets a plain "nothing to check there". `--json` outside a project still answers with an error.
+- The log is calm by default: one line per finished check, and every 30 seconds one line like "still checking:
+  1 of 4 done, 2 min so far...". The line before every test run (change in, change out, the rerun, each piece) is
+  now behind `--verbose`, and there the rerun reads as the good news it is: "good sign, a test noticed the change was
+  gone: running them once more to make sure it wasn't luck".
+- Times in the log are in words: "they took 1 min 25 sec with it in" (was "1m 25s"), and the last line says
+  "Took 3 min 30 sec, spent $0.00." (was "210s, $0.00").
+
 ## 1.0.2 (2026-11-03)
 
 For a newcomer's first run on their own repo. Each of these was a dead end in a walk-through on a small fresh repo:
