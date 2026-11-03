@@ -1343,7 +1343,7 @@ def unnoticed_part(root: Path, c: dict, folder: Path, fcfg, fast=None) -> list:
 
 # The names of failing tests, as pytest, unittest, go test, cargo test, jest, dotnet test, Maven and Gradle print them.
 FAILED_TEST = re.compile(r"^(?:FAILED|ERROR) \S+::(?:\S+::)*([\w\[\]-]+)|^(?:FAIL|ERROR): (\w+) \(|--- FAIL: (\S+)|"
-                         r"^test (\S+) \.\.\. FAILED|✕ (.+?)(?: \(\d+ ?ms\))?$|^\s*Failed (\S+) \[|"
+                         r"^test (\S+) \.\.\. FAILED|^\s*✕ (.+?)(?: \(\d+ ?ms\))?$|^\s*Failed (\S+) \[|"
                          r"^\[ERROR\] (?:[\w$]+\.)*?([\w$]+\.[\w$]+|[\w$]+)(?:\([\w.$]*\))?\s+(?:-- )?Time elapsed:.*<<< (?:FAILURE|ERROR)!|"
                          r"^(?:[\w$]+\.)*([\w$]+ > .+?) FAILED$", re.M)
 
@@ -1546,20 +1546,54 @@ def judge(cfg, c: dict, diff: str, test: str, fail: str) -> dict:
 
 
 FAILED_ID = re.compile(r"^(?:FAILED|ERROR) (\S+::[^\s\"]+)", re.M)  # pytest's summary: FAILED tests/t.py::test_x - ...
+GO_FAILED = re.compile(r"^\s*--- FAIL: ([A-Za-z_]\w*)", re.M)  # go test: --- FAIL: TestTotal (0.00s), subtests TestX/case
+CARGO_FAILED = re.compile(r"^test (\S+) \.\.\. FAILED$", re.M)  # cargo test: test tests::rounds ... FAILED
+DOTNET_FAILED = re.compile(r"^\s*Failed (\S+) \[", re.M)  # dotnet test: "  Failed Shop.Tests.Rounds [12 ms]"
+ONE_COMMAND = re.compile(r"[;&|<>`]|\$\(")  # a test command that is more than one command: Bite can't tell where to add names
+
+
+def only_these(cmd: str, out: str, folder: Path) -> str:
+    """The test command changed to run only the tests that failed in out, or "" when that can't be told safely.
+    pytest: the failed test ids. go test: -run with the failed tests' names (a subtest's parent test reruns it).
+    cargo test: those names with --exact. dotnet test: a --filter of their full names. Others (npm test, Maven,
+    Gradle) print failures too many ways to pick them out safely, so the whole suite answers there."""
+    def names(pattern, ok=r"[\w:.]+"):
+        found = list(dict.fromkeys(pattern.findall(out)))
+        return found if found and len(found) <= 40 and all(re.fullmatch(ok, n) for n in found) else []
+    if "pytest" in cmd:
+        ids = names(FAILED_ID, r"\S+")
+        return pytest_one_file(cmd, " ".join(f'"{i}"' for i in ids), folder) if ids else ""
+    if ONE_COMMAND.search(cmd):
+        return ""
+    if re.match(r"\s*go\s+test\b", cmd):
+        ids = names(GO_FAILED, r"\w+")
+        cmd = re.sub(r"\s-run(?:=|\s+)(\"[^\"]*\"|'[^']*'|\S+)", "", cmd)
+        return cmd.replace("go test", f'go test -run "^({"|".join(ids)})$"', 1) if ids else ""
+    if re.match(r"\s*cargo\s+test\b", cmd):
+        ids = names(CARGO_FAILED)
+        if not ids or re.search(r"\s--(?:exact|skip)\b", cmd):
+            return ""
+        sep = "" if re.search(r"(?:^|\s)--(?:\s|$)", cmd) else " --"  # names go to the test binary, after --
+        return f"{cmd}{sep} --exact {' '.join(ids)}"
+    if re.match(r"\s*dotnet(?:\.exe)?\s+test\b", cmd):
+        ids = names(DOTNET_FAILED, r"[\w.]+")
+        cmd = re.sub(r'\s--filter(\s+|=)("[^"]*"|\S+)', "", cmd)
+        return f'{cmd} --filter "{"|".join("FullyQualifiedName=" + i for i in ids)}"' if ids else ""
+    return ""
 
 
 def failed_only(fcfg, folder: Path, out: str):
-    """A copy of fcfg whose test command runs only the pytest tests that failed in out, or None when that can't be
-    told (not pytest, tests in a box, no test named, a file that failed to load, or too many to list). Rerunning
-    only those tests answers "do they fail again?" in seconds instead of a whole suite's run."""
+    """A copy of fcfg whose test command runs only the tests that failed in out, or None when that can't be told
+    (a runner only_these doesn't know, tests in a box, no test named, a file that failed to load, or too many to
+    list). Rerunning only those tests answers "do they fail again?" in seconds instead of a whole suite's run."""
     cmd = bite.tests_cmd(fcfg)
-    if "pytest" not in cmd or fcfg.contain or bite.load_failure(out):
+    if fcfg.contain or bite.load_failure(out):
         return None
-    ids = list(dict.fromkeys(FAILED_ID.findall(out)))
-    if not ids or len(ids) > 40:
+    fast = only_these(cmd, out, Path(folder))
+    if not fast:
         return None
     sub = at(fcfg, folder)
-    sub.test_cmd = pytest_one_file(cmd, " ".join(f'"{i}"' for i in ids), Path(folder))
+    sub.test_cmd = fast
     sub.box_test_cmd = ""
     return sub
 
@@ -1838,7 +1872,7 @@ def try_guard(root: Path, c: dict, cfg, budget: float) -> dict:
         if rc not in cfg.ok_codes or ran_nothing(cmd, out):
             res["status"] = "its test failed with the change in"
             return res
-    step("Running it with the change taken out (it must fail) ...")
+    step("Running it with the change taken out (this time it should fail: that shows it catches the bug) ...")
     f = export(root, c["sha"], cfg)
     try:
         take_out(root, c, f)
@@ -1851,7 +1885,7 @@ def try_guard(root: Path, c: dict, cfg, budget: float) -> dict:
         res["status"] = "its test couldn't load without the change"
     else:
         fail = repo.failure_excerpt(out, 15)
-        step("It failed without the change. A second, fresh check is reading it to see if it's fair ...")
+        step("Good: it failed without the change, so it catches the bug. A second, fresh check is reading it to see if it's fair ...")
         v = guard_judge(cfg, c, diff, res["test"], fail)
         res["judge"] = v
         if (v.get("verdict") or "").upper() == "FAIR":
@@ -2195,7 +2229,7 @@ color:var(--bg);background:var(--gap);border-radius:4px;padding:2px 7px;margin-b
 {f'<h2>Claims tested</h2><table>{claims}</table>' if tried else ""}
 <h2>If this change disappeared, would any test notice?</h2>
 {f'<table>{rows}</table>' if rows else '<p class="sub">No commits were checked.</p>'}
-<footer>"Held" means a test fails when the change is taken out. It doesn't prove the commit has no other bugs.
+<footer>✅ means a test failed when Bite took the change out. That's the good result: the test caught it, so it will warn you if the change ever breaks. It doesn't prove the commit has no other bugs.
 Details and rerun commands are in the other files in this folder. Made by <a href="https://github.com/connabyss/bite">Bite</a>.</footer>
 </main>
 """
@@ -3031,6 +3065,8 @@ def main(argv=None):
         print(f"{say(c)[1]}: {c['sha'][:8]} \"{short(c['subject'])}\": {flat(say(c)[2])[2:].strip()}")
     checked = [c for c in cs if c.get("undo")]
     held = [c for c in checked if c["undo"].startswith(("guarded", "closed since"))]
+    if held:  # a newcomer reads "failed" as bad: here it's the result you want
+        print("\n✅ means that with the change taken out, a test failed. That's the good result: your tests caught it.")
     print(f"\nChecked {len(checked)} commit(s): a test noticed {len(held)}, no test noticed {len(flagged)}, "
           + (f"undone by a later commit {len(back)}, " if back else "")
           + f"{len(checked) - len(held) - len(flagged) - len(back)} couldn't be checked or skipped"

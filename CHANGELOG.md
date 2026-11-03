@@ -10,6 +10,12 @@ github.com/connabyss/bite. Install or update: `pipx install --force bite-check -
   with 2 pieces used to cost 5 whole-suite runs and now costs 2, plus a few runs of just those tests. Results stay
   the same: those tests also run once with the change back in, where they must pass, and whenever they pass with a
   piece out, the whole suite decides as before.
+- The same speed-up for Go, Rust and .NET (`go test`, `cargo test`, `dotnet test`): only the tests that noticed
+  rerun. npm test, Maven, Gradle and any test command of more than one step still run the whole suite, since
+  their failures can't be picked out safely.
+- Clearer results for newcomers: when a test fails with the change taken out, Bite now says that's the good result
+  (the test caught it), in the terminal, the report page, `bite live` and `bite mcp`.
+- Fool Bite: TRICKS.md invites you to sneak a "fix" past Bite, with an "I fooled Bite" issue form for entries.
 
 ## 1.0.3 (2026-11-03)
 

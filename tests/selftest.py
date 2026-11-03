@@ -187,7 +187,7 @@ try:
     check("--write-tests says what it's doing at each step, in plain words",
           "Asking Claude to write the missing test for" in out and "1 of 2: " in out
           and "Running it twice with the change in (it must pass)" in out
-          and "Running it with the change taken out (it must fail)" in out
+          and "Running it with the change taken out (this time it should fail" in out
           and "A second, fresh check is reading it" in out and "Spent $" in out, out)
     check("--write-tests: the pull request comment shows the test, ready to paste in",
           "🧪 The missing test" in comment and "clamp(-5, 0, 9)" in comment and "~~~~python" in comment
