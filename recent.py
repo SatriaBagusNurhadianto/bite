@@ -2023,7 +2023,7 @@ def say(c: dict, newest: str = "") -> tuple[str, str, str]:
         if c.get("head") and c.get("head_ok"):
             return ("skip", "➖ tests failed here, fixed later", "➖ Your tests failed at this commit and pass on the "
                     f"newest one (`{c['head'][:8]}`), so Bite skipped it.")
-        if newest and c["sha"] != newest:
+        if newest and c["sha"] != newest and not c.get("head"):
             return ("skip", "➖ tests failed here, skipped", "➖ Your tests failed at this commit, so Bite skipped it "
                     "(a later commit may have fixed them).")
         return ("fail", "❌ tests already fail", "❌ Your tests fail at this commit before Bite takes anything out, so "
@@ -3031,24 +3031,61 @@ def main(argv=None):
         if c.get("remembered"):
             done(c)
     t_free = time.time()
+    red = {}  # set once the tests fail before Bite changes anything, on the first commits and on today's code
+
+    def already_red() -> bool:
+        """The first 2 commits checked both failed with nothing taken out: do the tests fail on the newest commit
+        too? Then every other commit would only say the same (validator.js: 40 checks of a suite whose test
+        command skipped a build step), so Bite stops and says so once."""
+        if "head" in red:
+            return red["head"] is not None
+        fails = [c for c in todo if c.get("undo") == "tests fail at this commit"]
+        if len(fails) < 2 or len([c for c in todo if c.get("undo")]) != len(fails):
+            return False
+        print("  the tests failed at the first 2 commits before Bite took anything out: running them on the newest "
+              "commit, with nothing changed...", flush=True)
+        ok, why = tests_pass_at(root, top or newest, cfg)
+        red["head"] = None if ok else why
+        return not ok
+
     if JOBS[0] > 1 and len(todo) > 1:
         from concurrent.futures import ThreadPoolExecutor, as_completed
         print(f"  {min(JOBS[0], len(todo))} at a time (--jobs)", flush=True)
         with ThreadPoolExecutor(JOBS[0]) as pool:
             futs = {pool.submit(undo_check, root, c, cfg): c for c in todo}
             for f in as_completed(futs):
+                if f.cancelled():
+                    continue
                 futs[f]["undo"] = f.result()
                 done(futs[f])
+                if already_red():
+                    for g in futs:
+                        g.cancel()
     else:
         for c in todo:
             c["undo"] = undo_check(root, c, cfg)
             done(c)
+            if already_red():
+                break
+    if red.get("head") is not None:
+        left = [c for c in todo if not c.get("undo")]
+        print(f"\nYour tests already fail before Bite changes anything, on the newest commit too ({red['head']}).\n"
+              f"Bite stopped here instead of checking the other {len(left)}: every check would fail the same way. Fix "
+              "the tests first. If they pass on your own computer, Bite may be running them differently: set "
+              f"test_command in .bite.ini ({SETUP_LINK}).", flush=True)
+        todo = [c for c in todo if c.get("undo")]
+        free = [c for c in free if c.get("undo")]
+        for c in free:  # shown as "tests already fail", not as skipped ones a later commit may have fixed
+            if c["undo"] == "tests fail at this commit":
+                c.update(head=top or newest, head_ok=False, head_why=red["head"])
+        if not getattr(cfg, "free_cmd", ""):  # claims run with test_command, which free_test_command may not be
+            free_only = True  # no claim can be tested on tests that already fail: nothing to spend on
     PROGRESS["total"] = 0
     tip = slow_tip((time.time() - t_free) / len(todo), len(todo), cfg) if todo else ""
     if tip:
         print(f"  {tip}", flush=True)
     last = next((c for c in free if c["sha"] == newest and c["undo"] == "tests fail at this commit"), None)
-    if last and top and top != newest:  # later commits changed no code, but one may have fixed the tests
+    if last and top and top != newest and "head" not in last:  # later commits changed no code, but one may have fixed the tests
         last["head"] = top
         last["head_ok"], last["head_why"] = tests_pass_at(root, top, cfg)
         print(f"  the tests {'pass' if last['head_ok'] else 'fail too'} on the newest commit, {top[:8]}, which changed no code",
