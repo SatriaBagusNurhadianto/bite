@@ -139,3 +139,11 @@ def test_cargo_the_slow_tests_run_only_with_the_change_in_and_out(tmp_path):
     c, log = bite(root)
     assert c["result"] == "noticed", (c, log)
     assert runs.read_text() == "xx", (runs.read_text(), log)
+
+
+def test_a_quoted_cross_in_a_traceback_is_not_a_test_name():
+    # pytest prints the failing line's source; a ✕ inside it (as in a test of jest output) was read as a jest
+    # failure, and Bite's PR comment named `adds up (3 ms)\n", HERE) == ""` as the test that noticed.
+    out = '>       assert f("  ✕ adds up (3 ms)\\n", HERE) == ""\nFAILED tests/test_x.py::test_total - assert 1\n'
+    assert recent.caught_by(out) == "`test_total`"
+    assert recent.caught_by("  ✓ ok (1 ms)\n  ✕ adds up (3 ms)\n") == "`adds up`"
