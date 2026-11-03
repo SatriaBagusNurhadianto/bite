@@ -5,6 +5,12 @@ github.com/connabyss/bite. Install or update: `pipx install --force bite-check -
 
 ## Unreleased
 
+- Faster when a commit brings its own test (pytest). With the change taken out, Bite runs that commit's own test
+  files first. When they notice (fail again, and pass with the change back in), the whole suite doesn't run a
+  second time. Otherwise the whole suite decides, as before. Bite's check of its own 3-commit pull request #155 went
+  from 15 min 41 sec to 5 min 56 sec on a 4-core machine, with the same results.
+- Bite's own pull request check no longer runs 2 commits at once (`--jobs 2`): on a 4-core machine whose tests
+  already run 4 at a time, that made every run wait on the other.
 - Faster for pytest projects. Once a test notices a change is gone, the luck check (run once more) and the piece
   check (each piece of the change taken out alone) run only the tests that noticed, not the whole suite. A commit
   with 2 pieces used to cost 5 whole-suite runs and now costs 2, plus a few runs of just those tests. Results stay
