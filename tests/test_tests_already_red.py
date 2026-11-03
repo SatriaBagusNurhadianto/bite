@@ -43,7 +43,7 @@ def test_bite_stops_when_the_tests_already_fail_today(tmp_path):
     runs = tmp_path / "runs.txt"
     commits, log = bite(repo(tmp_path / "shop", runs))
     assert "Your tests already fail before Bite changes anything, on the newest commit too" in log, log
-    assert "instead of checking the other 3" in log, log
+    assert "instead of checking the other 3" in log and "Bite ran: " in log, log
     assert len(runs.read_text()) == 3, (runs.read_text(), log)  # 2 commits and the newest one; before, 5
     checked = [c for c in commits if c.get("result")]
     assert len(checked) == 2 and all(c["result"] == "tests_fail" for c in checked), commits

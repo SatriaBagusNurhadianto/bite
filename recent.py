@@ -2822,9 +2822,22 @@ def leave_own_python() -> None:
     os.environ["PATH"] = os.pathsep.join(p for p in parts if not (p and same(p, own)))
 
 
+def utf8_output() -> None:
+    """Output sent to a file or a pipe in UTF-8. On Windows it was written in the system's code page (cp1252),
+    where ✅ and ⚠️ came out as "?" and a cut-off subject's "…" as a stray byte (marked's run.log). A terminal keeps
+    its own encoding: Python already writes Windows consoles in Unicode."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if not stream.isatty() and (stream.encoding or "").lower().replace("-", "") != "utf8":
+                stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError, ValueError):
+            pass  # not a real stream (a test's capture): leave it
+
+
 def main(argv=None):
     if argv is None:  # run from the command line (a test calling main() keeps its own PATH)
         leave_own_python()
+        utf8_output()
     argv = list(sys.argv[1:] if argv is None else argv)
     if "--json" in argv and argv[:1] not in (["live"], ["ask"], ["mcp"]) and not {"-h", "--help", "--version"} & set(argv):
         # Only the results go to stdout, so a program can read them; what Bite says along the way goes to stderr.
@@ -3094,7 +3107,7 @@ def main(argv=None):
         print(f"\nYour tests already fail before Bite changes anything, on the newest commit too ({red['head']}).\n"
               f"Bite stopped here instead of checking the other {len(left)}: every check would fail the same way. Fix "
               "the tests first. If they pass on your own computer, Bite may be running them differently: set "
-              f"test_command in .bite.ini ({SETUP_LINK}).", flush=True)
+              f"test_command in .bite.ini ({SETUP_LINK}). Bite ran: {bite.tests_cmd(cfg)}", flush=True)
         todo = [c for c in todo if c.get("undo")]
         free = [c for c in free if c.get("undo")]
         for c in free:  # shown as "tests already fail", not as skipped ones a later commit may have fixed

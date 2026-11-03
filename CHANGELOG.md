@@ -8,10 +8,12 @@ github.com/connabyss/bite. Install or update: `pipx install --force bite-check -
 - When your tests already fail before Bite changes anything, Bite now says so once and stops. If the first 2
   commits it checks fail with nothing taken out, it runs the tests on the newest commit, and when they fail there
   too it stops instead of running every other check the same way (on validator.js that was 40 checks, because
-  the test command skipped a build step). When the newest commit's tests pass, it goes on as before.
+  the test command skipped a build step), and names the test command it ran. When the newest commit's tests pass, it goes on as before.
 - A test the commit added that is skipped on this system (marked: `{ skip: process.platform === 'win32' }`) no
   longer makes Bite say "its tests didn't notice". It says the test was skipped here, so it couldn't notice. Read
   from node --test, TAP, go test -v, cargo test and pytest -rs output.
+- On Windows, output sent to a file (`bite --free > run.log`) is now UTF-8: the ✅ and ⚠️ marks came out as "?"
+  and a cut-off subject's "…" as a stray byte.
 - README: a short "Bite does this, you decide that" box, and a link to the Fool Bite challenge (#156).
 - Faster when a commit brings its own test (pytest). With the change taken out, Bite runs that commit's own test
   files first. When they notice (fail again, and pass with the change back in), the whole suite doesn't run a
