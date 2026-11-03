@@ -1127,12 +1127,16 @@ def check_undo(root: Path, c: dict, cfg) -> str:
             return "no tests ran at this commit"
         bite.cap_hang(fcfg, now)
         take_out(root, c, folder)
-        doing(c, f"running them with the change taken out (they took {took(now)} with it in)...")
-        # A failure beside another commit's run (--jobs) is confirmed by the next run, alone: the rerun below, or
-        # here when there is none. Confirming it straight away too ran every noticed change's tests twice more.
-        undone = run_tests(fcfg, folder, confirm=False)
-        if undone.get("shared") and (QUICK[0] or bite.load_failure(undone["out"])):
-            undone = run_tests(fcfg, folder, alone=True)
+        # The commit's own tests first: when they notice the change is gone (and fail again, and pass with it
+        # back in), the whole suite with the change out would only say the same thing, more slowly.
+        undone, fast = own_tests_notice(root, c, folder, fcfg)
+        if undone is None:
+            doing(c, f"running them with the change taken out (they took {took(now)} with it in)...")
+            # A failure beside another commit's run (--jobs) is confirmed by the next run, alone: the rerun below, or
+            # here when there is none. Confirming it straight away too ran every noticed change's tests twice more.
+            undone = run_tests(fcfg, folder, confirm=False)
+            if undone.get("shared") and (QUICK[0] or bite.load_failure(undone["out"])):
+                undone = run_tests(fcfg, folder, alone=True)
 
         def flag():  # would be flagged: first rule out the usual harmless reasons
             if c.get("skip"):
@@ -1146,8 +1150,8 @@ def check_undo(root: Path, c: dict, cfg) -> str:
             return "guarded"  # by a doc example the commit wrote (Rust runs those as tests, pytest when told to)
         if undone["ok"]:
             return flag()
-        crashed, fast = bite.load_failure(undone["out"]), None
-        if not crashed and not QUICK[0]:
+        crashed = bite.load_failure(undone["out"])
+        if not crashed and not QUICK[0] and not fast:
             # Once more: a test that fails now and then (flaky) can fail by luck. Only a test that fails every
             # time the change is out counts as noticing it.
             doing(c, "good sign, a test noticed the change was gone: running them once more to make sure it wasn't luck"
@@ -1596,6 +1600,55 @@ def failed_only(fcfg, folder: Path, out: str):
     sub.test_cmd = fast
     sub.box_test_cmd = ""
     return sub
+
+
+PYTEST_FILE = re.compile(r"(?:test_[^/]*|[^/]*_test)\.py$")
+
+
+def own_tests(fcfg, folder: Path, c: dict):
+    """A copy of fcfg whose test command runs only the pytest files this commit added or changed, or None when
+    that isn't safe to tell: not pytest, tests in a box, no such file, or a file the project's own command might
+    not run (it names folders, or the settings set testpaths, and the file isn't in them)."""
+    cmd = bite.tests_cmd(fcfg)
+    if "pytest" not in cmd or fcfg.contain:
+        return None
+    files = [t for t in c.get("test_code") or [] if PYTEST_FILE.search(t) and (Path(folder) / t).is_file()]
+    if not files or len(files) > 20:
+        return None
+    roots = [t.strip("\"'").rstrip("/") for t in cmd.split()[1:] if not t.startswith("-")
+             and (Path(folder) / t.strip("\"'")).is_dir() and t.strip("\"'") not in (".", "./")]
+    if not roots:  # no folder named: pytest runs its settings' testpaths, or everything
+        for n in ("pytest.ini", "pyproject.toml", "tox.ini", "setup.cfg"):
+            text = (Path(folder) / n).read_text(encoding="utf-8", errors="replace") if (Path(folder) / n).is_file() else ""
+            m = re.search(r"(?m)^\s*testpaths\s*=\s*(\[[^\]]*\]|.*)$", text)
+            if m:
+                roots = [r.strip("/") for r in re.split(r"[\s,]+", re.sub(r"[\[\]\"']", " ", m.group(1))) if r]
+                if not roots or any(ch in "".join(roots) for ch in "*?{$"):
+                    return None  # a pattern or a variable: not something to match a file against
+                break
+    if roots and not all(any(f == r or f.startswith(r + "/") for r in roots) for f in files):
+        return None
+    sub = at(fcfg, folder)
+    sub.test_cmd = pytest_one_file(cmd, " ".join(f'"{f}"' for f in files), Path(folder))
+    sub.box_test_cmd = ""
+    return sub
+
+
+def own_tests_notice(root: Path, c: dict, folder: Path, fcfg) -> tuple:
+    """With the change taken out, run only the tests this commit added or changed. When some fail, fail again,
+    and pass with the change back in (failed_again), the change is noticed: returns (that run, the command that
+    runs just the tests that noticed), and the whole suite needn't run again with the change out. Otherwise
+    (None, None): the whole suite answers, as before. The folder is left with the change out."""
+    own = own_tests(fcfg, folder, c)
+    if own is None:
+        return None, None
+    doing(c, "running the tests this commit added or changed, with the change taken out...")
+    first = run_tests(own, folder, confirm=False)
+    if first["ok"] or first.get("hung") or bite.load_failure(first["out"]):
+        return None, None
+    doing(c, "good sign, a test noticed the change was gone: running them once more to make sure it wasn't luck...")
+    fast = failed_again(root, c, folder, fcfg, first["out"], alone=bool(first.get("shared")))
+    return ({**first, "shared": False}, fast) if fast else (None, None)
 
 
 def failed_again(root: Path, c: dict, folder: Path, fcfg, out: str, alone: bool = False):
