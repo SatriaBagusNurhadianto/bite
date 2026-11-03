@@ -1143,6 +1143,10 @@ def check_undo(root: Path, c: dict, cfg) -> str:
                 return f"not flagged: {c['skip']}"
             if c.get("test_code") and not tests_touch(root, c):
                 return "not flagged: its tests are about other code"
+            skipped = c.get("test_code") and own_test_skipped(root, c, undone["out"])
+            if skipped:
+                return (f"not flagged: its test `{skipped}` was skipped on "
+                        f"{ {'win': 'Windows', 'mac': 'macOS', 'linux': 'Linux'}[HERE]}, so it couldn't notice here")
             if closed_since(root, c, cfg):
                 return "closed since: today's tests catch it"
             return "TEST GUARDS NOTHING" if c.get("test_code") else "unguarded"
@@ -1603,6 +1607,24 @@ def failed_only(fcfg, folder: Path, out: str):
 
 
 PYTEST_FILE = re.compile(r"(?:test_[^/]*|[^/]*_test)\.py$")
+
+
+# Skipped tests, by name: node --test ("﹣ name (0.6ms) # SKIP"), TAP ("ok 3 - name # SKIP"), go test -v
+# ("--- SKIP: TestX"), cargo test ("test name ... ignored"), pytest -rs ("SKIPPED [1] t.py::test_x" / "t.py::test_x SKIPPED").
+SKIPPED_TEST = re.compile(r"^\s*\S (.+?) \([\d.]+m?s\) # SKIP\b|^\s*ok \d+ - (.+?) # SKIP\b|--- SKIP: (\S+)|"
+                          r"^test (?:\S+::)?(\S+) \.\.\. ignored|::(\w+)(?:\[[^\]]*\])? SKIPPED", re.M)
+
+
+def own_test_skipped(root: Path, c: dict, out: str) -> str:
+    """The name of a test this commit added that was skipped in this run, or "". A test the commit wrote for its
+    fix may only run on another system (marked: { skip: process.platform === 'win32' }): skipped, it can't notice
+    the change, so "its tests didn't notice" would be wrong here."""
+    names = list(dict.fromkeys(next(g for g in m.groups() if g).strip() for m in SKIPPED_TEST.finditer(out)))
+    if not names:
+        return ""
+    diff = repo.git(root, "show", "--format=", "--no-color", c["sha"], "--", *c["test_code"]) or ""
+    added = "\n".join(ln[1:] for ln in diff.splitlines() if ln.startswith("+") and not ln.startswith("+++"))
+    return next((n for n in names if len(n) > 3 and n in added), "")
 
 
 def own_tests(fcfg, folder: Path, c: dict):
