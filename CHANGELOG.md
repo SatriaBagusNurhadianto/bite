@@ -5,6 +5,9 @@ github.com/connabyss/bite. Install or update: `pipx install --force bite-check -
 
 ## Unreleased
 
+- A change no test noticed, whose code a later commit in the same run rewrote, is no longer flagged when a test
+  notices that rewrite ("rewritten later by <commit>"). A pull request's early drafts no longer look like gaps
+  (found on h2 #1329). If the rewrite isn't noticed either, the flag stays.
 - When your tests already fail before Bite changes anything, Bite now says so once and stops. If the first 2
   commits it checks fail with nothing taken out, it runs the tests on the newest commit, and when they fail there
   too it stops instead of running every other check the same way (on validator.js that was 40 checks, because

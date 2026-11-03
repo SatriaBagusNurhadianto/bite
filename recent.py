@@ -1478,6 +1478,28 @@ def change_diff(root: Path, c: dict, context: int = 3) -> bytes:
                     raw=True)
 
 
+def rewritten_by(root: Path, c: dict, free: list) -> str:
+    """For a change no test noticed: the later commit, checked in this same run with ✅, that rewrote the same code,
+    so this change no longer comes back out of today's code (h2 #1329: e1f7c12c was flagged, but a6ed24e later in
+    the same pull request rewrote that code, and a test notices the rewrite). "" when there's none: then the gap
+    stands. A later commit Bite didn't check, or didn't find noticed, never hides it."""
+    later = [x for x in free if x is not c and str(x.get("undo", "")).startswith(("guarded", "closed since"))
+             and set(x.get("code") or []) & set(c.get("code") or [])
+             and subprocess.run(["git", "merge-base", "--is-ancestor", c["sha"], x["sha"]], cwd=root,
+                                capture_output=True).returncode == 0]
+    if not later:
+        return ""
+    diff = change_diff(root, c, 0)
+    if not diff:
+        return ""
+    with tempfile.TemporaryDirectory(prefix="bite_rewritten_") as d:  # a scratch index: the checkout isn't touched
+        env = {**os.environ, "GIT_INDEX_FILE": str(Path(d) / "index")}
+        run = lambda *a: subprocess.run(["git", *a], cwd=root, env=env, input=diff, capture_output=True).returncode  # noqa: E731
+        if run("read-tree", "HEAD") or not run("apply", "--cached", "--check", "--unidiff-zero", "-R", "-"):
+            return ""  # the change still comes back out of today's code: it wasn't rewritten
+    return later[0]["sha"]
+
+
 def git_apply_ok(folder: Path, diff: bytes, *flags: str) -> bool:
     return subprocess.run(["git", "apply", *flags, "-"], cwd=folder, input=diff, capture_output=True).returncode == 0
 
@@ -3177,6 +3199,11 @@ def main(argv=None):
             done(c)
             if already_red():
                 break
+    for c in free:  # a gap whose code a later, noticed commit in this run rewrote: the rewrite is what counts now
+        if str(c.get("undo", "")).startswith("unguarded") or c.get("undo") == "TEST GUARDS NOTHING":
+            by = rewritten_by(root, c, free)
+            if by:
+                c["undo"] = f"not flagged: rewritten later by {by[:8]}, and a test notices that"
     if red.get("head") is not None:
         left = [c for c in todo if not c.get("undo")]
         print(f"\nYour tests already fail before Bite changes anything, on the newest commit too ({red['head']}).\n"
