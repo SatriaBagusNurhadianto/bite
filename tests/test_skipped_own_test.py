@@ -56,3 +56,29 @@ def test_a_fix_whose_own_test_is_skipped_here_is_not_called_unnoticed(tmp_path):
                        encoding="utf-8", timeout=300, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     c = json.loads(p.stdout)["commits"][0]
     assert c["result"] == "skipped" and "rounds totals to cents" in c["label"] + str(c), (c, p.stderr)
+
+
+def test_a_subtest_added_inside_a_skipped_parent_counts_as_skipped(tmp_path):
+    # dotenv 7c675904 (11-03, CH's Windows PC): the commit added a subtest inside the existing
+    # t.test('POSIX signal forwarding', { skip: process.platform === 'win32' }). tap prints only the parent,
+    # "ok 1 - POSIX signal forwarding # SKIP", so the subtest's own name never shows.
+    root = tmp_path / "cli"
+    (root / "tests").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    head = "const t = require('tap')\n\n"
+    parent = ("t.test('POSIX signal forwarding', { skip: process.platform === 'win32' }, async ct => {\n"
+              "  ct.test('forwards SIGTERM', async () => {})\n")
+    tail = "})\n\nt.test('reads the file', async () => {})\n"
+    f = root / "tests" / "test-cli-signals.js"
+    f.write_text(head + parent + tail)
+    subprocess.run([*GIT, "add", "-A"], cwd=root, check=True)
+    subprocess.run([*GIT, "commit", "-q", "-m", "start"], cwd=root, check=True)
+    f.write_text(head + parent + "  ct.test('exits when the command dies from a signal', async () => {})\n" + tail)
+    subprocess.run([*GIT, "commit", "-qam", "fix(cli): exit when the command dies from SIGPIPE"], cwd=root, check=True)
+    sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True).stdout.strip()
+    c = {"sha": sha, "test_code": ["tests/test-cli-signals.js"]}
+    out = "    ok 1 - POSIX signal forwarding # SKIP\n    ok 2 - reads the file\n# { total: 2, pass: 1, skip: 1 }\n"
+    assert recent.own_test_skipped(root, c, out) == "POSIX signal forwarding"
+    # A skipped test the commit didn't touch says nothing about it.
+    other = "    ok 1 - POSIX signal forwarding\n    ok 2 - reads the file # SKIP\n"
+    assert recent.own_test_skipped(root, c, other) == ""

@@ -1754,7 +1754,29 @@ def own_test_skipped(root: Path, c: dict, out: str) -> str:
         return ""
     diff = repo.git(root, "show", "--format=", "--no-color", c["sha"], "--", *c["test_code"]) or ""
     added = "\n".join(ln[1:] for ln in diff.splitlines() if ln.startswith("+") and not ln.startswith("+++"))
-    return next((n for n in names if len(n) > 3 and n in added), "")
+    own = next((n for n in names if len(n) > 3 and n in added), "")
+    return own or next((n for n in names if len(n) > 3 and added_inside(root, c, n)), "")
+
+
+def added_inside(root: Path, c: dict, name: str) -> bool:
+    """Whether this commit added lines inside the skipped test called name, in one of its test files: a subtest
+    inside a skipped parent never runs, and tap names only the parent (dotenv 7c675904 added a subtest inside
+    t.test('POSIX signal forwarding', { skip: process.platform === 'win32' }))."""
+    sibling = re.compile(r"^\s*(?:\w+\.)*(?:test|it|describe|suite)\s*\(")
+    for f in c["test_code"]:
+        lines = (repo.git(root, "show", f"{c['sha']}:{f}") or "").splitlines()
+        diff = repo.git(root, "show", "--format=", "--no-color", "-U0", c["sha"], "--", f) or ""
+        new = {int(m.group(1)) + k for m in re.finditer(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@", diff, re.M)
+               for k in range(int(m.group(2) or 1))}
+        for i, ln in enumerate(lines):
+            if not sibling.match(ln) or not re.search(rf"""['"`]{re.escape(name)}['"`]""", ln):
+                continue
+            depth = len(ln) - len(ln.lstrip())
+            end = next((j for j in range(i + 1, len(lines)) if sibling.match(lines[j])
+                        and len(lines[j]) - len(lines[j].lstrip()) <= depth), len(lines))
+            if any(i + 1 < n <= end for n in new):  # git counts lines from 1
+                return True
+    return False
 
 
 def own_tests(fcfg, folder: Path, c: dict):
