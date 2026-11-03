@@ -5,6 +5,8 @@ github.com/connabyss/bite. Install or update: `pipx install --force bite-check -
 
 ## Unreleased
 
+- `--only` finds the commits named wherever they are in the history. It used to look only among the last 40,
+  so an older commit got "Nothing to check".
 - JavaScript projects: Bite's copies now sit outside the project, with a link to its `node_modules`, instead of
   inside `node_modules`. Tools that skip anything under `node_modules` (jest, `@babel/register`, tap) skipped the
   copies too, so on validator.js every commit showed as "tests already fail" though its tests pass.

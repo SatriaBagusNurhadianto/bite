@@ -193,11 +193,18 @@ LFS_WARNED = set()
 
 # ---- which commits ---------------------------------------------------------------
 
-def commits(root: Path, last: int, since: str = "") -> list:
+def commits(root: Path, last: int, since: str = "", named: list | None = None) -> list:
     # With since, only commits since doesn't have: a pull request that merged its base back in would otherwise
-    # list the base's newer commits first, crowding out its own.
+    # list the base's newer commits first, crowding out its own. With named, just those commits (--only), however
+    # far back they are: they used to be looked for only among the last 40.
     span = [f"{since}..HEAD"] if since else []
-    raw = repo.git(root, "log", f"-n{last}", "--no-merges", "--format=%H%x1f%an%x1f%ae%x1f%s%x1f%b%x1e", *span) or ""
+    if named is not None:
+        shas = [repo.git(root, "rev-parse", "--verify", "-q", f"{n}^{{commit}}") for n in named]
+        span = list(dict.fromkeys(x for x in shas if x))
+        if not span:
+            return []
+    log = ["log", "--no-walk=sorted"] if named is not None else ["log", f"-n{last}", "--no-merges"]
+    raw = repo.git(root, *log, "--format=%H%x1f%an%x1f%ae%x1f%s%x1f%b%x1e", *span) or ""
     out = []
     for rec in raw.split("\x1e"):
         parts = rec.strip("\n").split("\x1f")
@@ -3086,6 +3093,8 @@ def main(argv=None):
     cs = commits(root, opt("--last", 40), since)  # --all is still accepted: every commit is the default now
     seen = len(cs)
     top = cs[0]["sha"] if cs else ""  # the newest commit of all, even one that changed no code
+    if only:  # the commits named, wherever they are in the history
+        cs = commits(root, 0, named=only) or cs
     for c in cs:
         files_of(root, c, cfg)
     other = [c for c in cs if c["other_lang"] and not c["code"]]
