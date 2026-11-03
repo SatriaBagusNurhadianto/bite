@@ -17,6 +17,11 @@ github.com/connabyss/bite. Install or update: `pipx install --force bite-check -
 - The comeback alarm no longer goes off for a replacement fix: when the later commit that put the old code back
   also took out the fix's tests and added tests of its own (dayjs b575c81a fixed d0e6738a's bug in the timezone
   plugin instead), Bite says "➖ replaced by a later fix", a note instead of "🔁 UNDONE BY A LATER COMMIT".
+- Git submodules are in Bite's copies now. git archive leaves them out, so a project whose tests read one (tomlkit's
+  toml-test cases) showed "tests already fail" on every commit. Each is filled from its checkout; Bite says once if
+  one isn't checked out (`git submodule update --init`).
+- When the tests fail with nothing taken out, Bite runs them once more before skipping that commit: a test that
+  fails now and then (h2's Hypothesis test, on a cold copy) skipped 2 commits whose tests pass.
 - README: a short "Bite does this, you decide that" box, and a link to the Fool Bite challenge (#156).
 - Faster when a commit brings its own test (pytest). With the change taken out, Bite runs that commit's own test
   files first. When they notice (fail again, and pass with the change back in), the whole suite doesn't run a

@@ -459,10 +459,49 @@ def export(root: Path, sha: str, cfg) -> Path:
     data = subprocess.run(["git", "archive", "--format=tar", sha], cwd=root, capture_output=True).stdout
     untar(data, dest)
     lfs_fill(root, dest, data)
+    submodule_fill(root, dest, sha)
     for name in cfg.copy_ignore:  # nothing to do for most repos: ignored files aren't committed
         for p in dest.rglob(name):
             shutil.rmtree(p, ignore_errors=True) if p.is_dir() else None
     return dest
+
+
+SUB_WARNED = set()
+
+
+def submodule_fill(root: Path, dest: Path, sha: str) -> int:
+    """git archive leaves git submodules out: their folders come out empty, and a test that reads one fails on
+    every copy (tomlkit's toml-test suite: "tests already fail: FileNotFoundError" on every commit). Fill each from
+    its checkout in the project, at the commit this one pins (or what's checked out, if that commit isn't there).
+    Warn once about any that aren't checked out. Returns how many were left empty."""
+    if not (dest / ".gitmodules").is_file():
+        return 0
+    left = []
+    for line in (repo.git(root, "ls-tree", "-r", "--full-tree", sha) or "").splitlines():
+        meta, _, path = line.partition("\t")
+        parts = meta.split()
+        if len(parts) < 3 or parts[0] != "160000":
+            continue
+        sub, target = root / path, dest / path
+        if not target.resolve().is_relative_to(dest.resolve()):
+            continue
+        data = b""
+        if (sub / ".git").exists():
+            for rev in (parts[2], "HEAD"):
+                r = subprocess.run(["git", "archive", "--format=tar", rev], cwd=sub, capture_output=True)
+                if r.returncode == 0 and r.stdout:
+                    data = r.stdout
+                    break
+        if data:
+            target.mkdir(parents=True, exist_ok=True)
+            untar(data, target)
+        else:
+            left.append(path)
+    if left and str(root) not in SUB_WARNED:
+        SUB_WARNED.add(str(root))
+        print(f"  note: {len(left)} git submodule(s) aren't checked out, so Bite's copies don't have them (e.g. "
+              f"{left[0]}): run `git submodule update --init` so tests that read them work there.", flush=True)
+    return len(left)
 
 
 def untar(data: bytes, dest: Path) -> None:
@@ -1144,6 +1183,12 @@ def check_undo(root: Path, c: dict, cfg) -> str:
     try:
         doing(c, "running the tests with the change in...")
         now = run_tests(fcfg, folder)
+        if not now["ok"] and not now.get("hung") and not now["out"].startswith("not run:"):
+            # Once more before giving up on this commit: a test that fails now and then (h2's Hypothesis test, on
+            # a cold copy) would otherwise skip a commit whose tests pass.
+            doing(c, "the tests failed with nothing taken out: running them once more, in case that was luck...")
+            again = run_tests(fcfg, folder, alone=True)
+            now = again if again["ok"] else now
         if not now["ok"]:
             c["why"] = fail_why(now)
             return "tests fail at this commit"

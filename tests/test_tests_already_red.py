@@ -20,7 +20,7 @@ def repo(root, runs, fixed_at_the_end=False):
     test = (f"def test_shop():\n    with open({str(runs)!r}, 'a') as f:\n        f.write('x')\n"
             "    import built  # noqa: F401\n    from shop import total\n    assert total([1]) == 1\n")
     steps = [("Start", {"shop.py": "def total(xs):\n    return sum(xs)\n", "test_shop.py": test})]
-    for i in range(5):
+    for i in range(8):
         steps.append((f"Fix total rounding, case {i}", {"shop.py": f"def total(xs):\n    return round(sum(xs), {i + 2})\n"}))
     if fixed_at_the_end:
         steps.append(("Add the built module", {"built.py": "X = 1\n"}))
@@ -43,8 +43,9 @@ def test_bite_stops_when_the_tests_already_fail_today(tmp_path):
     runs = tmp_path / "runs.txt"
     commits, log = bite(repo(tmp_path / "shop", runs))
     assert "Your tests already fail before Bite changes anything, on the newest commit too" in log, log
-    assert "instead of checking the other 3" in log and "Bite ran: " in log, log
-    assert len(runs.read_text()) == 3, (runs.read_text(), log)  # 2 commits and the newest one; before, 5
+    assert "instead of checking the other 4" in log and "Bite ran: " in log, log
+    # 2 commits (each run twice, in case a failure was luck) and the newest one; before, all 6 Bite checks by default.
+    assert len(runs.read_text()) == 5, (runs.read_text(), log)
     checked = [c for c in commits if c.get("result")]
     assert len(checked) == 2 and all(c["result"] == "tests_fail" for c in checked), commits
 
@@ -53,4 +54,4 @@ def test_bite_goes_on_when_a_later_commit_fixed_the_tests(tmp_path):
     runs = tmp_path / "runs.txt"
     commits, log = bite(repo(tmp_path / "shop", runs, fixed_at_the_end=True))
     assert "already fail before Bite changes anything" not in log, log
-    assert len([c for c in commits if c.get("result")]) == 6, commits  # every commit, as before
+    assert len([c for c in commits if c.get("result")]) == 6, commits  # all 6 it checks by default, as before
