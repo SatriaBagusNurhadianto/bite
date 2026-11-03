@@ -444,7 +444,10 @@ def files_of(root: Path, c: dict, cfg) -> None:
     c["moved"] = {n: o for n, o in moved.items() if n in c["code"]}
     # Code in a language the test command doesn't run can't fail a test: taking it out says nothing about it.
     runs = repo.runs_language(cfg.test_cmd)[1]
-    c["other_lang"] = [n for n in c["code"] if runs and Path(n).suffix.lower() not in runs]
+    # A TypeScript declaration file (.d.ts) holds types only: no test runs it, so taking it out can't fail one
+    # (dayjs 4fbe94aa and f68d73ef were flagged for changing only types/index.d.ts).
+    c["other_lang"] = [n for n in c["code"] if (runs and Path(n).suffix.lower() not in runs)
+                       or re.search(r"\.d\.[cm]?ts$", n.lower())]
     c["code"] = [n for n in c["code"] if n not in c["other_lang"]]
     stat = repo.git(root, "diff", "-M", "--shortstat", f"{c['sha']}^", c["sha"], "--", *code_paths(c)) if c["code"] else ""
     c["lines"] = sum(int(x) for x in re.findall(r"(\d+) (?:insertion|deletion)", stat or ""))

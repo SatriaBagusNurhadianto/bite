@@ -5,6 +5,8 @@ github.com/connabyss/bite. Install or update: `pipx install --force bite-check -
 
 ## Unreleased
 
+- A commit that changed only TypeScript declaration files (`.d.ts`) is listed as code the tests can't run, not
+  flagged: those files hold types only (dayjs).
 - `why:` lines no longer end in a literal `\r` or start with a `+` taken from tap's escaped diff dump of the error
   (node-semver on Windows).
 - When a commit turns out "rewritten later", Bite prints a line saying it's not flagged after all, so the list matches
