@@ -892,8 +892,32 @@ def came_back(root: Path, c: dict) -> str:
     if not culprit:
         return "undone since"
     c["undone_by"] = {"sha": culprit, "subject": repo.git(root, "log", "-n1", "--format=%s", culprit) or ""}
+    if replaced(root, sha, culprit, c.get("tests") or []):
+        return "replaced since"
     # "Revert ...", "fix #587 by reverting ...": done on purpose, so a note rather than the alarm
     return "reverted since" if re.search(r"(?i)\brevert", c["undone_by"]["subject"]) else "undone since"
+
+
+def replaced(root: Path, sha: str, culprit: str, tests: list) -> bool:
+    """The commit that put the old code back also took out the fix's own test lines and added tests of its own:
+    a replacement fix, done somewhere else (dayjs b575c81a fixed d0e6738a's timezone bug in the plugin instead,
+    10 minutes later, with new tests). That's a note, not the alarm: nobody lost the fix by accident."""
+    if not tests:
+        return False
+    fix = repo.git(root, "diff", "--no-color", "-U0", f"{sha}^", sha, "--", *tests) or ""
+    fix_lines = {ln[1:].strip() for ln in fix.splitlines() if ln.startswith("+") and not ln.startswith("+++")
+                 and len(ln[1:].strip()) >= 10}
+    cfg, at_file, took_out, added = repo.load_cfg(root), "", False, False
+    for ln in (repo.git(root, "show", "--format=", "--no-color", "-U0", culprit) or "").splitlines():
+        if ln.startswith("+++ "):
+            at_file = ln[6:] if ln.startswith("+++ b/") else ""
+        elif ln.startswith("--- ") or not at_file and not ln.startswith("-"):
+            continue
+        elif ln.startswith("-") and ln[1:].strip() in fix_lines:
+            took_out = True
+        elif ln.startswith("+") and at_file and bite.is_test_file(at_file, cfg) and len(ln[1:].strip()) >= 10:
+            added = True
+    return took_out and added
 
 
 def redone(root: Path, sha: str, culprit: str, code: list) -> bool:
@@ -1998,11 +2022,14 @@ def say(c: dict, newest: str = "") -> tuple[str, str, str]:
     failing on an older commit are skipped, since they often get fixed later."""
     u, caught = c.get("undo", ""), c.get("caught", "")
     one = caught and " more" not in caught
-    if u in ("undone since", "reverted since"):
+    if u in ("undone since", "reverted since", "replaced since"):
         import html
         by = c.get("undone_by") or {}
         who = (f"commit `{by['sha'][:8]}` (“{html.escape(by['subject'], quote=False).replace('`', chr(39))}”)"
                if by else "a later commit")
+        if u == "replaced since":
+            return ("skip", "➖ replaced by a later fix", f"➖ {who[0].upper() + who[1:]} put the old code back, took "
+                    "out this fix's tests and fixed it another way with tests of its own, so Bite didn't check it.")
         if u == "reverted since":
             return "skip", "➖ reverted on purpose", f"➖ {who[0].upper() + who[1:]} reverted it on purpose, so Bite didn't check it."
         return ("back", "🔁 UNDONE BY A LATER COMMIT", f"🔁 {'This fix slipped out the back door: ' if ROAST[0] else ''}"

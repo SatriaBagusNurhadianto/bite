@@ -14,6 +14,9 @@ github.com/connabyss/bite. Install or update: `pipx install --force bite-check -
   from node --test, TAP, go test -v, cargo test and pytest -rs output.
 - On Windows, output sent to a file (`bite --free > run.log`) is now UTF-8: the ✅ and ⚠️ marks came out as "?"
   and a cut-off subject's "…" as a stray byte.
+- The comeback alarm no longer goes off for a replacement fix: when the later commit that put the old code back
+  also took out the fix's tests and added tests of its own (dayjs b575c81a fixed d0e6738a's bug in the timezone
+  plugin instead), Bite says "➖ replaced by a later fix", a note instead of "🔁 UNDONE BY A LATER COMMIT".
 - README: a short "Bite does this, you decide that" box, and a link to the Fool Bite challenge (#156).
 - Faster when a commit brings its own test (pytest). With the change taken out, Bite runs that commit's own test
   files first. When they notice (fail again, and pass with the change back in), the whole suite doesn't run a
