@@ -2901,6 +2901,7 @@ def how_called() -> str:
 # Every option main() accepts; each one must be in the help text above (the self-test checks).
 JSON_RUN = [False]  # set while --json runs, so a run outside a repo answers with JSON instead of the demo
 FLAGS = {"--keep-output", "--verbose", "--free", "--all", "--any", "--serious", "--again", "--roast", "--demo", "--write-tests", "--json", "--quick"}
+AT_LEAST_ONE = {"--free-checks"}  # 0 here would check no commit and still end like a clean run
 VALUED = {"--last": int, "--free-checks": int, "--suspects": int, "--budget": float, "--since": str, "--part-runs": int,
           "--shard": str, "--only": str, "--jobs": int}
 VALUE_EXAMPLE = {"--budget": "1.00", "--since": "main", "--part-runs": 6, "--shard": "2/5", "--only": "1a2b3c4d", "--jobs": 4}
@@ -3050,6 +3051,9 @@ def main(argv=None):
                 return 2
             if below:
                 print(f"Bite: {argv[i]} needs {need} of 0 or more, got {argv[i + 1]!r}.")
+                return 2
+            if argv[i] in AT_LEAST_ONE and kind(argv[i + 1]) < 1:  # 0 checks nothing, then ends as if all is well
+                print(f"Bite: {argv[i]} needs {need} of 1 or more, got {argv[i + 1]!r}.")
                 return 2
             i += 2
         elif argv[i] in FLAGS or (argv[i] == "comeback" and i and argv[i - 1] == "--demo"):

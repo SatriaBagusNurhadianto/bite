@@ -5,6 +5,7 @@ github.com/connabyss/bite. Install or update: `pipx install --force bite-check -
 
 ## Unreleased
 
+- `--free-checks 0` is refused with a plain message. It used to check nothing and end as if all was well.
 - A test the commit added inside a parent test that is skipped on this system counts as skipped too, not as
   "didn't notice". tap names only the skipped parent (dotenv 7c675904 on Windows).
 - A commit that changed only TypeScript declaration files (`.d.ts`) is listed as code the tests can't run, not
