@@ -2932,7 +2932,11 @@ def main(argv=None):
     other = [c for c in cs if c["other_lang"] and not c["code"]]
     cs = [c for c in cs if c["code"]]
     newest = cs[0]["sha"] if cs else ""  # git log lists the newest first
-    print(f"Bite: {len(cs)} commits changed code in the last {opt('--last', 40)}.", flush=True)
+    last = int(opt('--last', 40))
+    if seen < last:
+        print(f"Bite: {len(cs)} commits changed code in all {seen}.", flush=True)
+    else:
+        print(f"Bite: {len(cs)} commits changed code in the last {last}.", flush=True)
     lang = repo.runs_language(cfg.test_cmd)[0]
     if cs and repo.shallow(root):
         print(f"  {repo.SHALLOW}", flush=True)
